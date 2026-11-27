@@ -1,0 +1,3602 @@
+---
+title: "Tesis"
+author: "Victor Eduardo Flores García"
+date: "2026-09-03"
+output: html_document
+---
+
+##Modelo VECM para identificar la sobrerreacción del tipo de cambio
+
+Basado en el trabajo de Capistrán, Chiquiar y Hernández (2017)
+
+#Bitácora de cambios (revisión)
+
+Los cambios de la revisión se marcan en el código con `# [Rev. 2026-09-15]`. La línea original se conserva comentada debajo de la etiqueta `# Original:`. Respaldo de los archivos originales en `respaldo/`.
+
+**2026-09-15**
+
+1. Paquetes: `install.packages()` sólo instalaba `tibble`; ahora instala `pacman` y `p_load` se encarga del resto.
+2. Directorio: se comenta `setwd("~/Documents/TESIS")` para que el Rmd corra desde la carpeta del proyecto; se lee explícitamente la hoja `dts_niv`.
+3. X-13ARIMA-SEATS: las series son trimestrales; se declaran con `frequency = 4, start = c(2000, 4)` (antes `frequency = 12, start = c(2000, 9)`).
+4. Dinero: CCH (2017) usan M1 **real** (M1/P, Tabla 1). Se define `m` = M1 desestacionalizado / INPC desestacionalizado.
+5. Tasas de interés: CCH (2017, pie de página 5) usan `0.25 * ln(1 + R/100)`; faltaba el logaritmo en `r` y `r_usa`.
+6. Series de tiempo: se corrige el inicio a `c(2000, 4)`, se excluye la columna `Periodo` y cada objeto `*_ts` se construye con su tibble correspondiente.
+7. Tipo de cambio (Excel): la tabla dinámica de la hoja `e` sumaba los tres meses del trimestre; se cambió a promedio y se actualizó la columna `e` de `dts_niv` (ver hoja `bitacora` de `datos.xlsx`). El Rmd no cambia en este punto.
+
+**2026-09-15**
+
+8. Variables dicotómicas (Bloque 1): escalones de CCH (2017, p. 9) `D091`, `D121` y `D151`. `D914` (1991T4) queda fuera de la muestra. Se agregan impulsos `D202` y `D203` por la pandemia (2020T2 y 2020T3), que no existen en CCH; se activan o desactivan con `incluir_covid`.
+9. DF-GLS: el chunk "con tendencia" usaba `model = "constant"`; se cambia a `model = "trend"`.
+10. Réplica de la Tabla 3 de CCH (Bloque 2): pruebas ADF y DF-GLS en niveles y primeras diferencias con la especificación de CCH (constante y tendencia en niveles con tendencia; sólo constante en tasas y diferencias) y rezagos por el criterio MAIC de Ng y Perron (2001).
+11. ARDL (Bloque 3): la demanda de dinero y la relación del producto incluyen las dummies como regresores fijos, como en CCH (2017, Tabla 2).
+12. VAR subyacente (Bloque 4): exógenas en primeras diferencias con un rezago (Δwti, Δpp_usa) más las dummies, como en CCH (2017, p. 13); `VARselect` evalúa de 1 a 4 rezagos (Tabla 4) y el VAR se estima con p = 2 y constante, coherente con `ca.jo(K = 2)`.
+13. Exogeneidad débil de `y_usa` y `r_usa` (Bloque 4): prueba LR sobre las cargas α en el sistema completo y prueba de la traza del sistema parcial (constante y escalones restringidos al espacio de cointegración) con valores críticos simulados, como en CCH (2017, Tabla 5).
+14. Bounds test con constante restringida (`case = 2`), que es la especificación de CCH (2017, Tabla 2, nota), además del `case = 3` original.
+15. Comparación de especificaciones de OUT y MD (Bloque 3): con y sin tendencia lineal, elegidas por BIC (CCH, 2017, p. 8), y distintos juegos de dummies (ninguna, pandemia, CCH y fechas de Bai-Perron).
+16. Búsqueda exploratoria de cambios estructurales de Bai y Perron (2003) en las relaciones estáticas de OUT y MD; se agrega `strucchange` a `p_load`.
+
+**2026-09-18: datos nuevos de Víctor**
+
+17. Los datos ahora se leen de `datos_v2.xlsx`, que agrega Cetes a 91 días (`cetes91`, clave SF3338) y las series de FRED `cpf3m`, `tb3ms` y `tedrate`.
+18. `datos_v2.xlsx` se construyó sobre el archivo original, por lo que se volvió a corregir el tipo de cambio (promedio trimestral, no suma) y se agregó la columna `r91` a `dts_niv` (ver hoja `bitacora`).
+19. Tasa de interés doméstica: se usa Cetes a 91 días como en CCH (2017, Tabla 1). Con `usar_cetes91 <- FALSE` se vuelve a Cetes a 28 días.
+20. Diferencial de financiamiento: `TEDRATE` se descontinuó en 2021T4, así que se usa `ted = cpf3m - tb3ms` (papel comercial financiero AA a 3 meses menos Cetes del Tesoro a 3 meses), que cubre toda la muestra. Se compara con `tedrate` en el traslape.
+21. `ted` entra en primeras diferencias con un rezago como exógena del VAR y del sistema parcial, y se agrega a las pruebas de raíz unitaria (Tabla 3).
+
+**2026-09-19: variables dicotómicas**
+
+22. Pruebas de elasticidad unitaria (Bloque 3): se replican las pruebas de Wald de CCH (2017, pp. 9-10) sobre los coeficientes de largo plazo (p_usa = 1, e = 1, r = 1, r_usa = -1, y = 1, y_usa = 1), calculadas con el método delta.
+23. La tabla comparativa de OUT y MD agrega el valor-p de la elasticidad unitaria de cada especificación.
+24. Sensibilidad del rango de cointegración a las dummies (Bloque 4): se repite la prueba de la traza del sistema parcial con cinco configuraciones (sin dummies, sólo pandemia, escalones de CCH con y sin pandemia, y escalones de Bai-Perron con pandemia), cada una con sus propios valores críticos simulados.
+
+**2026-09-19: la pandemia como cambio de nivel y estimación del VECM**
+
+25. Nueva dicotómica `S2002`: escalón permanente desde 2020T2. Con impulsos la relación del producto no aparece (F caso 2 = 1.69) y con escalón sí (9.60), de modo que la pandemia se comporta como un cambio de nivel y no como un par de valores atípicos.
+26. Las dicotómicas de la pandemia pasan a ser escalón más impulsos (`S2002`, `D202`, `D203`). El escalón entra restringido al espacio de cointegración, como los de CCH; los impulsos entran sin restricción.
+27. Diagnóstico de la relación del producto (Bloque 3): pruebas de raíz unitaria sobre la brecha `y - y_usa` y ARDL en la submuestra previa a la pandemia.
+28. Nuevo Bloque 5: estimación del VECM con las restricciones de largo plazo de CCH (ec. 3.1), prueba LR de sobreidentificación, prueba de exogeneidad débil y valores críticos por bootstrap paramétrico, como en CCH (2017, p. 14).
+
+**2026-09-19: tres escenarios para el VECM--aquí necesito de tu feedback, Víctor: ¿que quieres presentar?**
+
+29. La función de valores críticos por bootstrap se generaliza: recibe la prueba a recalcular y descarta las repeticiones en las que el algoritmo iterativo no converge, informando cuántas fueron válidas.
+30. Nuevo Bloque 6: se plantean y estiman **tres escenarios** para el espacio de cointegración (A: sin restricciones; B: sólo UIP y OUT; C: las cuatro relaciones de CCH), con su prueba LR, valores críticos bootstrap, vectores de cointegración, velocidades de ajuste y una guía de decisión. **La elección entre los tres escenarios es tuya, Víctor.**
+
+#Bloque 1: Obtención y transformación de los datos
+
+Importar librerías y datos para el periodo 2000T4-2025T4
+
+```{r}
+
+# [Rev. 2026-09-15] install.packages() recibía varios paquetes como argumentos separados y sólo instalaba "tibble"
+# Original: if (!require("pacman")) install.packages("tibble", "seasonal", "tidyverse", "readxl","readr", "scales", "forecast", "feasts", "tsibble", "xts", "zoo", "ARDL", "urca", "tseries", "vars")
+if (!require("pacman")) install.packages("pacman")
+# [Rev. 2026-09-15] Se agrega strucchange para la búsqueda de cambios estructurales (Bloque 3)
+# Original: pacman::p_load(tibble, seasonal, tidyverse, readxl, readr, scales, forecast, feasts, tsibble, xts, zoo, ARDL, urca, tseries, vars)
+pacman::p_load(tibble, seasonal, tidyverse, readxl, readr, scales, forecast, feasts, tsibble, xts, zoo, ARDL, urca, tseries, vars, strucchange, sandwich, lmtest, ggplot2, dplyr, mFilter, ggtext, purrr, gt)
+
+
+```
+
+Importar los datos en niveles
+
+```{r}
+
+# [Rev. 2026-09-15] Se usa la carpeta del proyecto (donde está el Rmd) y se indica la hoja explícitamente
+# Original: setwd("~/Documents/TESIS")
+# Original: datos<-read_excel("datos.xlsx")
+# [Rev. 2026-09-18] Datos nuevos del tesista (Cetes 91 días y series de FRED para el diferencial)
+# Original: datos<-read_excel("datos.xlsx", sheet = "dts_niv")
+datos<-read_excel("datos_v2.xlsx", sheet = "dts_niv")
+```
+
+Tasa de interés doméstica y diferencial de financiamiento
+
+CCH (2017, Tabla 1) usan Cetes a 91 días y el diferencial TED. TEDRATE se descontinuó (termina en 2021T4), por lo que se usa el diferencial entre el papel comercial financiero AA a 3 meses (CPF3M) y los Cetes del Tesoro a 3 meses (TB3MS), disponible para toda la muestra.
+
+```{r}
+
+# [Rev. 2026-09-18] Nuevo chunk: elección de la tasa doméstica y construcción del diferencial
+usar_cetes91 <- TRUE # <- Cambie a FALSE para usar Cetes a 28 días (SF282), como en la versión previa
+
+comparacion_ted <- datos %>% 
+  dplyr::select(Periodo, tedrate, cpf3m, tb3ms) %>% 
+  mutate(ted_sustituto = cpf3m - tb3ms)
+
+# Correlación en el traslape con el TED original (hasta 2021T4)
+print(comparacion_ted %>% 
+        filter(!is.na(tedrate)) %>% 
+        summarise(Correlacion = cor(tedrate, ted_sustituto),
+                  Media_TED = mean(tedrate),
+                  Media_sustituto = mean(ted_sustituto)))
+
+datos <- datos %>% 
+  mutate(
+    r = if (usar_cetes91) r91 else r, # Cetes 91 días (SF3338) o 28 días (SF282)
+    ted = cpf3m - tb3ms               # Diferencial de financiamiento (sustituto del TED)
+  ) %>% 
+  dplyr::select(-r91, -cpf3m, -tb3ms, -tedrate)
+
+# [Rev. 2026-09-18] En el traslape (2000T4-2021T4) la correlación entre TEDRATE y cpf3m - tb3ms es 0.964
+# (medias 0.396 y 0.263), por lo que el sustituto reproduce bien la dinámica del diferencial original.
+
+```
+
+Ajuste estacional mediante X-13 ARIMA SEATS. 
+
+Nota: se realiza el ajuste estacional únicamente para estas dos series, ya que el resto ya contaban con este ajuste. Además, CCH(2017) mencionan que, fueron las únicas series que desestacionalizaron mediante la metodología TRAMO-SEATS (ver pp. 6, pie de página 5)
+
+```{r}
+
+seleccion_ts <- datos %>%
+  dplyr::select(c("p", "m")) %>%
+  mutate(
+    # [Rev. 2026-09-15] Los datos son trimestrales y empiezan en 2000T4
+    # Original: p_ts = ts(p, frequency = 12, start = c(2000, 9)),
+    # Original: m_ts = ts(m, frequency = 12, start = c(2000, 9))
+    p_ts = ts(p, frequency = 4, start = c(2000, 4)),
+    m_ts = ts(m, frequency = 4, start = c(2000, 4))
+  )
+
+# Ajuste estacional X-13ARIMA-SEATS
+p_ae <- seas(seleccion_ts$p_ts)
+m_ae <- seas(seleccion_ts$m_ts)
+
+seleccion_ts <- seleccion_ts %>%
+  mutate(
+    p_ae_num = as.numeric(final(p_ae)),
+    m_ae_num = as.numeric(final(m_ae))
+  )
+
+```
+Obtener un tibble con todas las series numéricas en niveles, el cual se nombrará como "datos".
+
+```{r}
+
+datos <- datos %>%
+   mutate(
+     p = seleccion_ts$p_ae_num,
+     # [Rev. 2026-09-15] M1 real desestacionalizado (M1/P), como en CCH (2017, Tabla 1)
+     # Original: m = seleccion_ts$m_ae_num
+     m = seleccion_ts$m_ae_num / seleccion_ts$p_ae_num,
+     año = seq(as.Date("2000-09-01"), by = "quarter", length.out = nrow(datos))
+   )
+
+```
+
+
+Aplicar las transformaciones logarítmicas y obtener todas las series numéricas en logaritmos con el nombre "Ldatos".
+
+```{r}
+
+Ldatos <- datos %>%
+  mutate(
+    y = log(datos$y),
+    p = log(seleccion_ts$p_ae_num),
+    # [Rev. 2026-09-15] Faltaba el logaritmo: CCH (2017, pie de página 5) usan 0.25 ln(1 + R/100)
+    # Original: r = 0.25 * (1 + datos$r/100),
+    r = 0.25 * log(1 + datos$r/100),
+    # [Rev. 2026-09-15] M1 real (datos$m ya es M1/P desestacionalizado)
+    # Original: m = log(seleccion_ts$m_ae_num),
+    m = log(datos$m),
+    e = log(datos$e),
+    y_usa = log(datos$y_usa),
+    p_usa = log(datos$p_usa),
+    wti = log(datos$wti),
+    pp_usa = log(datos$pp_usa),
+    # [Rev. 2026-09-15] Faltaba el logaritmo
+    # Original: r_usa = 0.25 * (1 + datos$r_usa/100)
+    r_usa = 0.25 * log(1 + datos$r_usa/100),
+    año = seq(as.Date("2000-12-01"), by = "quarter", length.out = nrow(datos))
+  )
+
+```
+
+Obtener las primeras diferencias de las series en niveles "Ddatos".
+
+```{r}
+
+Ddatos <- datos %>% 
+  mutate(
+    y = datos$y - lag(datos$y),
+    m = datos$m - lag(datos$m),
+    p = datos$p - lag(datos$p),
+    r = datos$r - lag(datos$r),
+    y_usa = datos$y_usa - lag(datos$y_usa),
+    p_usa = datos$p_usa - lag(datos$p_usa),
+    r_usa = datos$r_usa - lag(datos$r_usa),
+    e = datos$e - lag(datos$e),
+    wti = datos$wti - lag(datos$wti),
+    pp_usa = datos$pp_usa - lag(datos$pp_usa),
+    # [Rev. 2026-09-18] Diferencial de financiamiento
+    ted = datos$ted - lag(datos$ted),
+    año = seq(as.Date("2000-12-01"), by = "quarter", length.out = nrow(datos))
+         )
+```
+
+Obtener las primeras diferencias logarítmicas "DLdatos".
+
+```{r}
+
+DLdatos <- Ldatos %>% 
+  mutate(
+    y = Ldatos$y - lag(Ldatos$y),
+    m = Ldatos$m - lag(Ldatos$m),
+    p = Ldatos$p - lag(Ldatos$p),
+    r = Ldatos$r - lag(Ldatos$r),
+    y_usa = Ldatos$y_usa - lag(Ldatos$y_usa),
+    p_usa = Ldatos$p_usa - lag(Ldatos$p_usa),
+    r_usa = Ldatos$r_usa - lag(Ldatos$r_usa),
+    e = Ldatos$e - lag(Ldatos$e),
+    wti = Ldatos$wti - lag(Ldatos$wti),
+    pp_usa = Ldatos$pp_usa - lag(Ldatos$pp_usa),
+    # [Rev. 2026-09-18] Diferencial de financiamiento (no se transforma a logaritmos, como en CCH)
+    ted = Ldatos$ted - lag(Ldatos$ted),
+    año = seq(as.Date("2000-12-01"), by = "quarter", length.out = nrow(datos))
+         )
+```
+
+
+Variables dicotómicas
+
+Nota: CCH (2017, p. 9) usan dummies de escalón. D914 (cambio regulatorio de M1 en 1991T4) queda fuera de la muestra. D091, D121 y D151 se conservan con sus fechas originales. D202 y D203 son impulsos por la pandemia (no están en CCH).
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: dummies de CCH (2017) y de la pandemia
+incluir_covid <- TRUE # <- Cambie a FALSE para estimar sin las dummies de la pandemia
+
+dummies <- datos %>%
+  dplyr::select(Periodo) %>%
+  mutate(
+    anio = as.numeric(substr(Periodo, 1, 4)),
+    trim = as.numeric(substr(Periodo, 6, 7)),
+    D091 = ifelse(anio + (trim - 1)/4 >= 2009, 1, 0), # Escalón desde 2009T1
+    D121 = ifelse(anio + (trim - 1)/4 >= 2012, 1, 0), # Escalón desde 2012T1
+    D151 = ifelse(anio + (trim - 1)/4 >= 2015, 1, 0), # Escalón desde 2015T1
+    D202 = ifelse(Periodo == "2020/02", 1, 0),        # Impulso 2020T2
+    D203 = ifelse(Periodo == "2020/03", 1, 0),        # Impulso 2020T3
+    # [Rev. 2026-09-19] Escalón permanente desde 2020T2: la pandemia dejó un cambio de nivel (ver diagnóstico del Bloque 3)
+    S2002 = ifelse(anio + (trim - 1)/4 >= 2020.25, 1, 0)
+  ) %>%
+  dplyr::select(-anio, -trim)
+
+dummies_escalon <- c("D091", "D121", "D151")
+
+# [Rev. 2026-09-19] La pandemia se modela con escalón permanente más impulsos
+# Original: dummies_covid <- if (incluir_covid) c("D202", "D203") else NULL
+pandemia_escalon <- TRUE # <- Cambie a FALSE para usar únicamente los impulsos
+
+dummies_covid <- if (incluir_covid) {
+  if (pandemia_escalon) c("S2002", "D202", "D203") else c("D202", "D203")
+} else NULL
+
+# El escalón se restringe al espacio de cointegración; los impulsos entran sin restricción
+dummies_covid_escalon <- intersect(dummies_covid, "S2002")
+dummies_covid_impulso <- intersect(dummies_covid, c("D202", "D203"))
+
+```
+
+Transformar a series de tiempo
+
+```{r}
+
+# [Rev. 2026-09-15] Inicio en 2000T4, sin la columna de texto "Periodo" y cada objeto con su tibble
+# Original: datos_ts <- ts(Ldatos, frequency = 4, start = c(2000, 2))
+# Original: Ddatos_ts <- ts(Ldatos, frequency = 4, start = c(2000, 2))
+# Original: Ldatos_ts <- ts(Ldatos, frequency = 4, start = c(2000, 2))
+# Original: DLdatos_ts <- ts(Ldatos, frequency = 4, start = c(2000, 2))
+datos_ts <- ts(datos %>% dplyr::select(-Periodo), frequency = 4, start = c(2000, 4))
+Ddatos_ts <- ts(Ddatos %>% dplyr::select(-Periodo), frequency = 4, start = c(2000, 4))
+Ldatos_ts <- ts(Ldatos %>% dplyr::select(-Periodo), frequency = 4, start = c(2000, 4))
+DLdatos_ts <- ts(DLdatos %>% dplyr::select(-Periodo), frequency = 4, start = c(2000, 4))
+
+```
+
+Graficar las series de interés
+
+```{r}
+
+# [Rev. 2026-09-15] Inicio en 2000T4 y sin la columna "Periodo"
+# Original: datos_a_graficar <- ts(Ldatos %>% # <- Inserte las series de interés
+# Original:       mutate(coef_p = log(datos$p / datos$p_usa)),
+# Original:       frequency = 4, start = c(2000, 2)
+# Original:       )
+datos_a_graficar <- ts(Ldatos %>% # <- Inserte las series de interés
+      mutate(coef_p = Ldatos$p - Ldatos$p_usa) %>%
+      dplyr::select(-Periodo),
+      frequency = 4, start = c(2000, 4)
+      )
+
+series_interes <- c("p", "y", "r", "m", "y_usa", "p_usa", "r_usa", "wti", "pp_usa", "coef_p", "e") 
+
+for (serie in series_interes) {
+  p <- autoplot(datos_a_graficar[, serie]) +
+    theme_minimal() +
+    labs(
+      title = paste("Logaritmos",#<- Modifique según el tipo de datos
+                    ":", serie),
+      y = "Logaritmo", #<- Modifique según el tipo de datos
+      x = "Periodo"
+    )
+  print(p)
+}
+
+```
+
+#Bloque 2: Pruebas de raíces unitarias
+
+Seleccionar alguna de las series NUMÉRICAS para las pruebas
+
+```{r}
+
+datos_adf <- DLdatos
+
+```
+
+
+Prueba sin constante ni tendencia
+
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "none", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1]
+    cv_5pct  <- test@cval[1, "5pct"]
+    
+    tibble(
+      Estadistico_tau = tau_stat,
+      CV_5pct = cv_5pct,
+      Rezagos = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+print(resultados_adf)
+
+```
+
+Prueba con constante
+
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "drift", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1]
+    cv_5pct  <- test@cval[1, "5pct"]
+    
+    tibble(
+      Estadistico_tau = tau_stat,
+      CV_5pct = cv_5pct,
+      Lags = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+print(resultados_adf)
+
+```
+
+Prueba con tendencia
+
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "trend", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1]
+    cv_5pct  <- test@cval[1, "5pct"]
+    
+    tibble(
+      Estadistico_tau = tau_stat,
+      CV_5pct = cv_5pct,
+      Lags = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+print(resultados_adf)
+
+```
+
+Prueba ADF-GLS según Eliott et al (1996) con tendencia
+
+```{r}
+
+resultados_ers <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    # [Rev. 2026-09-15] El chunk es "con tendencia" pero usaba model = "constant"
+    # Original: test <- ur.ers(serie, type = "DF-GLS", model = "constant", lag.max = 4)
+    test <- ur.ers(serie, type = "DF-GLS", model = "trend", lag.max = 4)
+    
+    stat_gls <- as.numeric(test@teststat)
+    cv_5pct  <- as.numeric(test@cval[1, "5pct"]) 
+    
+    tibble(
+      Estadistico_GLS = stat_gls,
+      CV_5pct = cv_5pct,
+      Lags_Max = test@lag,
+      Estacionaria_5pct = ifelse(stat_gls < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+print(resultados_ers)
+
+```
+
+Prueba ADF-GLS según Eliott et al (1996) con constante
+
+```{r}
+
+resultados_ers <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.ers(serie, type = "DF-GLS", model = "constant", lag.max = 4)
+    
+    stat_gls <- as.numeric(test@teststat)
+    cv_5pct  <- as.numeric(test@cval[1, "5pct"]) 
+    
+    tibble(
+      Estadistico_GLS = stat_gls,
+      CV_5pct = cv_5pct,
+      Lags_Max = test@lag,
+      Estacionaria_5pct = ifelse(stat_gls < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+print(resultados_ers)
+
+```
+
+
+Réplica de la Tabla 3 de CCH (2017)
+
+CCH aplican las pruebas en niveles con constante y tendencia a las series con tendencia, sólo con constante a las tasas y a las primeras diferencias, y eligen los rezagos con el criterio MAIC de Ng y Perron (2001). El diferencial TED no se incluye (serie descontinuada).
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: número de rezagos según el MAIC de Ng y Perron (2001)
+rezagos_maic <- function(serie, modelo = "constant", k_max = 12) {
+  
+  # 1. Serie sin tendencia por MCG (Elliott et al., 1996)
+  T <- length(serie)
+  c_bar <- ifelse(modelo == "constant", -7, -13.5)
+  a <- 1 + c_bar/T
+  Z <- if (modelo == "constant") matrix(1, T, 1) else cbind(1, 1:T)
+  y_cuasi <- c(serie[1], serie[-1] - a * serie[-T])
+  Z_cuasi <- rbind(Z[1, ], Z[-1, , drop = FALSE] - a * Z[-T, , drop = FALSE])
+  y_gls <- serie - Z %*% qr.solve(Z_cuasi, y_cuasi)
+  
+  # 2. Regresiones ADF sobre la misma muestra para k = 0, ..., k_max
+  dy <- diff(y_gls)
+  y_rez <- y_gls[-T]
+  idx <- (k_max + 1):length(dy)
+  n <- length(idx)
+  
+  maic <- sapply(0:k_max, function(k) {
+    X <- y_rez[idx]
+    if (k > 0) X <- cbind(X, sapply(1:k, function(j) dy[idx - j]))
+    ajuste <- lm.fit(as.matrix(X), dy[idx])
+    s2 <- sum(ajuste$residuals^2)/n
+    tau <- ajuste$coefficients[1]^2 * sum(y_rez[idx]^2)/s2
+    log(s2) + 2 * (tau + k)/n
+  })
+  
+  which.min(maic) - 1
+}
+
+prueba_raiz_unitaria <- function(x, modelo) {
+  
+  serie <- as.numeric(na.omit(x))
+  k <- rezagos_maic(serie, modelo)
+  
+  adf <- ur.df(serie, type = ifelse(modelo == "trend", "trend", "drift"), lags = k, selectlags = "Fixed")
+  gls <- ur.ers(serie, type = "DF-GLS", model = modelo, lag.max = k)
+  
+  tibble(
+    Rezagos_MAIC = k,
+    ADF = adf@teststat[1],
+    CV_ADF_5pct = adf@cval[1, "5pct"],
+    DF_GLS = as.numeric(gls@teststat),
+    CV_GLS_5pct = as.numeric(gls@cval[1, "5pct"]),
+    Estacionaria_ADF_5pct = ifelse(ADF < CV_ADF_5pct, "Sí", "No"),
+    Estacionaria_GLS_5pct = ifelse(DF_GLS < CV_GLS_5pct, "Sí", "No")
+  )
+}
+
+```
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: especificación y valores de CCH (2017, Tabla 3) para comparar
+especificacion_tabla3 <- tribble(
+  ~Serie,   ~Datos,        ~Modelo,    ~ADF_CCH, ~DF_GLS_CCH,
+  "y",      "Niveles",     "trend",    -2.81,    -2.28,
+  "p",      "Niveles",     "trend",    -1.55,    -0.91,
+  "m",      "Niveles",     "trend",    -3.24,    -1.78,
+  "e",      "Niveles",     "trend",    -1.63,    -1.52,
+  "y_usa",  "Niveles",     "trend",    -1.08,    -1.14,
+  "p_usa",  "Niveles",     "trend",    -1.95,    -0.70,
+  "wti",    "Niveles",     "trend",    -1.81,    -1.76,
+  "pp_usa", "Niveles",     "trend",    -1.69,    -1.64,
+  "r",      "Niveles",     "constant", -2.48,    -0.63,
+  "r_usa",  "Niveles",     "constant", -2.07,    -0.69,
+  "ted",    "Niveles",     "constant", -2.72,    -0.99,
+  "y",      "Diferencias", "constant", -8.91,    -2.24,
+  "p",      "Diferencias", "constant", -2.34,    -2.03,
+  "r",      "Diferencias", "constant", -4.72,    -2.96,
+  "m",      "Diferencias", "constant", -3.56,    -2.36,
+  "e",      "Diferencias", "constant", -4.50,    -0.66,
+  "y_usa",  "Diferencias", "constant", -2.35,    -2.00,
+  "p_usa",  "Diferencias", "constant", -1.88,    -1.89,
+  "r_usa",  "Diferencias", "constant", -3.24,    -1.73,
+  "wti",    "Diferencias", "constant", -8.47,    -7.84,
+  "pp_usa", "Diferencias", "constant", -6.82,    -1.52,
+  "ted",    "Diferencias", "constant", -11.86,   -2.01
+)
+
+resultados_tabla3 <- especificacion_tabla3 %>%
+  mutate(pruebas = pmap(list(Serie, Datos, Modelo), function(serie, tipo_datos, modelo) {
+    x <- if (tipo_datos == "Niveles") Ldatos[[serie]] else DLdatos[[serie]]
+    prueba_raiz_unitaria(x, modelo)
+  })) %>%
+  unnest(pruebas)
+
+print(resultados_tabla3, n = Inf, width = Inf)
+
+# [Rev. 2026-09-18] Con Cetes a 91 días, r queda muy cerca de CCH (ADF -2.05 vs. -2.48; DF-GLS -0.632 vs. -0.63).
+# El diferencial ted rechaza la raíz unitaria en niveles con ambas pruebas (-2.98 y -2.66), a diferencia de CCH (-2.72 y -0.99),
+# lo que sugiere tratarlo como I(0); en el modelo sólo entra como exógena de corto plazo, así que no cambia la especificación.
+
+```
+
+#Bloque 3: Estimación de los ARDL
+
+Calcular los auto ARDL para seleccionar el número de rezagos óptimo
+
+Datos para usar en el modelo
+
+```{r}
+
+# [Rev. 2026-09-15] Se agregan las variables dicotómicas
+# Original: datos_ardl <- Ldatos %>% 
+# Original:   mutate(diff_e = DLdatos$e) %>% 
+# Original:   slice(-1)
+datos_ardl <- Ldatos %>% 
+  left_join(dummies, by = "Periodo") %>% 
+  mutate(diff_e = DLdatos$e) %>% 
+  slice(-1)
+
+```
+
+
+Estimar el número óptimo de rezagos
+
+```{r}
+
+modelo_ppp <- auto_ardl(p ~ p_usa + e, data = datos_ardl, max_order = 8, selection = "BIC")
+
+modelo_uip <- auto_ardl(diff_e ~ r + r_usa, data = datos_ardl, max_order = 8, selection = "BIC")
+
+# [Rev. 2026-09-15] Dummies como regresores fijos (después de "|"), como en CCH (2017, Tabla 2). D914 no aplica en MD
+# Original: modelo_md <- auto_ardl(m ~ y + r, data = datos_ardl, max_order = 8, selection = "BIC")
+# Original: modelo_out <- auto_ardl(y ~ y_usa, data = datos_ardl, max_order = 8, selection = "BIC")
+formula_md <- if (incluir_covid) {
+  as.formula(paste("m ~ y + r |", paste(dummies_covid, collapse = " + ")))
+} else {
+  m ~ y + r
+}
+formula_out <- as.formula(paste("y ~ y_usa |", paste(c(dummies_escalon, dummies_covid), collapse = " + ")))
+
+modelo_md <- auto_ardl(formula_md, data = datos_ardl, max_order = 8, selection = "BIC")
+
+modelo_out <- auto_ardl(formula_out, data = datos_ardl, max_order = 8, selection = "BIC")
+
+```
+
+Extraer los mejores modelos
+
+```{r}
+
+mejor_ppp <- modelo_ppp$best_model
+mejor_uip <- modelo_uip$best_model
+mejor_md <- modelo_md$best_model
+mejor_out <- modelo_out$best_model
+
+```
+
+Estimar en forma de corrección de error
+
+```{r}
+
+uecm_ppp <- uecm(mejor_ppp)
+uecm_uip <- uecm(mejor_uip)
+uecm_md <- uecm(mejor_md)
+uecm_out <- uecm(mejor_out)
+
+summary(uecm_ppp)
+summary(uecm_uip)
+summary(uecm_md)
+summary(uecm_out)
+
+```
+
+Resumen de los resultados
+
+```{r}
+
+bounds_f_test(mejor_ppp, case = 3)
+bounds_t_test(mejor_ppp, case = 3)
+
+bounds_f_test(mejor_uip, case = 3)
+bounds_t_test(mejor_uip, case = 3)
+
+bounds_f_test(mejor_md, case = 3)
+bounds_t_test(mejor_md, case = 3)
+
+bounds_f_test(mejor_out, case = 3)
+bounds_t_test(mejor_out, case = 3)
+
+```
+
+Prueba de límites con constante restringida
+
+CCH (2017, Tabla 2) incluyen una constante restringida en cada ARDL, lo que corresponde al caso 2 de Pesaran et al. (2001). En este caso sólo existe la prueba F.
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: bounds F con constante restringida (case = 2), como en CCH
+bounds_f_test(mejor_ppp, case = 2)
+bounds_f_test(mejor_uip, case = 2)
+bounds_f_test(mejor_md, case = 2)
+bounds_f_test(mejor_out, case = 2)
+
+# [Rev. 2026-09-19] Con el escalón permanente de pandemia, F (caso 2): PPP = 190.63, UIP = 21.35, MD = 39.17, OUT = 4.56 (valor-p = 0.031).
+# OUT pasa a tener relación de nivel (antes F = 0.74): también la rechaza con case 3 (F = 6.83; t = -3.68, valor-p = 0.015)
+# y su elasticidad ingreso externa es 0.885, que no rechaza la unidad de CCH (valor-p = 0.179).
+# En cambio MD queda ambigua con case 3 (F = 4.37, valor-p = 0.078; t = -2.38, valor-p = 0.364): la F rechaza y la t no.
+# [Rev. 2026-09-18] Con Cetes a 91 días e impulsos era PPP = 190.63, UIP = 21.35, MD = 40.20; OUT = 0.74 (valor-p = 0.92).
+
+```
+
+```{r}
+
+multipliers(mejor_ppp)
+multipliers(mejor_uip)
+multipliers(mejor_md)
+multipliers(mejor_out)
+
+```
+
+Pruebas de elasticidad unitaria
+
+CCH (2017, pp. 9-10) prueban con estadísticos de Wald si los coeficientes de largo plazo son iguales a sus valores teóricos: p_usa = 1 y e = 1 en PPP; r = 1 y r_usa = -1 en UIP; y = 1 en MD; y_usa = 1 en OUT. En el paper ninguna de estas hipótesis se rechaza al 5% (salvo p_usa, con valor-p de 0.01).
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: prueba de que un coeficiente de largo plazo es igual a su valor teórico (método delta)
+prueba_elasticidad <- function(modelo, relacion, termino, valor_h0 = 1) {
+  
+  largo_plazo <- multipliers(modelo)
+  i <- which(largo_plazo$Term == termino)
+  z <- (largo_plazo$Estimate[i] - valor_h0)/largo_plazo$`Std. Error`[i]
+  
+  tibble(
+    Relacion = relacion,
+    Termino = termino,
+    Estimacion = largo_plazo$Estimate[i],
+    Error_estandar = largo_plazo$`Std. Error`[i],
+    Valor_H0 = valor_h0,
+    z = z,
+    Valor_p = 2 * (1 - pnorm(abs(z))),
+    Se_rechaza_5pct = ifelse(2 * (1 - pnorm(abs(z))) < 0.05, "Sí", "No")
+  )
+}
+
+pruebas_elasticidad <- bind_rows(
+  prueba_elasticidad(mejor_ppp, "PPP", "p_usa"),
+  prueba_elasticidad(mejor_ppp, "PPP", "e"),
+  prueba_elasticidad(mejor_uip, "UIP", "r"),
+  prueba_elasticidad(mejor_uip, "UIP", "r_usa", -1),
+  prueba_elasticidad(mejor_md, "MD", "y"),
+  prueba_elasticidad(mejor_out, "OUT", "y_usa")
+)
+
+print(pruebas_elasticidad, width = Inf)
+
+# [Rev. 2026-09-19] Resultado: UIP (r = 1, r_usa = -1) y OUT (y_usa = 1) no rechazan, pero con errores estándar grandes,
+# es decir, no informativos. PPP rechaza ambas (p_usa = 1.43 y e = 0.29, muy lejos de la unidad; CCH obtienen 0.49 y 1.02)
+# y MD rechaza la elasticidad ingreso unitaria (y = 2.86, valor-p = 0.046; CCH obtienen 1.113 y no rechazan).
+# Esto importa para el sistema: las restricciones de sobreidentificación de CCH (ec. 3.1) imponen p = p_usa + e y m = y + br*r,
+# y con esta muestra al menos dos de ellas no están respaldadas por las estimaciones uniecuacionales.
+
+```
+
+
+Diagnóstico de la relación del producto
+
+Si OUT se cumpliera con elasticidad unitaria, la brecha `y - y_usa` sería estacionaria. También se estima el ARDL en la submuestra previa a la pandemia, para separar el efecto de 2020 del resto de la muestra.
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: estacionariedad de la brecha y ARDL previo a la pandemia
+brecha_producto <- Ldatos$y - Ldatos$y_usa
+
+diagnostico_brecha <- bind_rows(
+  prueba_raiz_unitaria(brecha_producto, "constant") %>% mutate(Serie = "y - y_usa (constante)"),
+  prueba_raiz_unitaria(brecha_producto, "trend") %>% mutate(Serie = "y - y_usa (constante y tendencia)"),
+  prueba_raiz_unitaria(diff(brecha_producto), "constant") %>% mutate(Serie = "D(y - y_usa)")
+) %>% 
+  dplyr::select(Serie, everything())
+
+print(diagnostico_brecha, width = Inf)
+
+datos_ardl_pre <- datos_ardl %>% 
+  filter(Periodo <= "2019/04")
+
+modelo_out_pre <- auto_ardl(y ~ y_usa, data = datos_ardl_pre, max_order = 8, selection = "BIC")
+
+bounds_f_test(modelo_out_pre$best_model, case = 2)
+bounds_t_test(modelo_out_pre$best_model, case = 3)
+multipliers(modelo_out_pre$best_model)
+
+# [Rev. 2026-09-19] La brecha y - y_usa no es estacionaria (ADF -0.64; DF-GLS 0.20), así que la relación con elasticidad
+# unitaria no se sostiene sin dicotómicas. Antes de la pandemia (2000T4-2019T4) la elasticidad estimada es 0.927 (EE 0.059),
+# muy cerca de la unidad, pero las pruebas de límites no son concluyentes (F caso 2 = 3.81, valor-p = 0.072; t = -2.58).
+# Con el escalón permanente en la muestra completa la relación sí aparece (ver la tabla comparativa y el Bloque 3).
+
+```
+
+Especificación de las relaciones OUT y MD: tendencia y variables dicotómicas
+
+CCH (2017, p. 8) estiman cada ARDL con y sin tendencia lineal y eligen con el BIC. Además, las dummies de OUT (2009T1, 2012T1 y 2015T1) se justifican con episodios de la muestra 1990-2015, por lo que se revisa si siguen siendo relevantes en 2000-2025. Como referencia exploratoria, se buscan cambios de nivel con el método de Bai y Perron (2003) en las relaciones estáticas, excluyendo la pandemia. Advertencia: las fechas surgen de los mismos datos y de regresiones en niveles, por lo que las pruebas posteriores con esas dummies deben leerse con cautela.
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: cambios estructurales de Bai y Perron (2003) en las relaciones estáticas
+datos_bp <- Ldatos %>% 
+  filter(!Periodo %in% c("2020/02", "2020/03"))
+
+fechas_quiebre <- function(formula, datos_bp, h = 0.15) {
+  
+  bp <- breakpoints(formula, data = datos_bp, h = h)
+  n_quiebres <- which.min(summary(bp)$RSS["BIC", ]) - 1 # Número de quiebres según BIC
+  
+  if (n_quiebres == 0) return(character(0))
+  datos_bp$Periodo[breakpoints(bp, breaks = n_quiebres)$breakpoints + 1] # Primer periodo de cada régimen
+}
+
+quiebres_out <- fechas_quiebre(y ~ y_usa, datos_bp)
+quiebres_md <- fechas_quiebre(m ~ y + r, datos_bp)
+
+print(quiebres_out)
+print(quiebres_md)
+
+# Escalones en las fechas encontradas (p. ej., "2005/03" -> S0503)
+nombre_escalon <- function(fecha) paste0("S", gsub("/", "", substr(fecha, 3, 7)))
+
+dummies_bp <- datos %>% dplyr::select(Periodo)
+for (fecha in unique(c(quiebres_out, quiebres_md))) {
+  dummies_bp[[nombre_escalon(fecha)]] <- ifelse(dummies_bp$Periodo >= fecha, 1, 0)
+}
+
+```
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: comparación de especificaciones con y sin tendencia y con distintas dummies
+comparar_ardl <- function(dependiente, regresores, dummies_fijas, tendencia, datos_modelo, termino_unitario = NULL) {
+  
+  # 1. Fórmula: tendencia como regresor y dummies como términos fijos (después de "|")
+  lado_derecho <- paste(c(regresores, if (tendencia) paste0("trend(", dependiente, ")")), collapse = " + ")
+  formula_txt <- paste(dependiente, "~", lado_derecho)
+  if (length(dummies_fijas) > 0) formula_txt <- paste(formula_txt, "|", paste(dummies_fijas, collapse = " + "))
+  
+  # 2. Selección de rezagos por BIC
+  modelo <- auto_ardl(as.formula(formula_txt), data = datos_modelo, max_order = 8, selection = "BIC")
+  mejor <- modelo$best_model
+  
+  # 3. Casos de Pesaran et al. (2001): sin tendencia 2 (restringida) y 3; con tendencia 4 (restringida) y 5
+  casos <- if (tendencia) c(4, 5) else c(2, 3)
+  f_restringido <- bounds_f_test(mejor, case = casos[1])
+  f_libre <- bounds_f_test(mejor, case = casos[2])
+  prueba_t <- bounds_t_test(mejor, case = casos[2])
+  
+  largo_plazo <- multipliers(mejor)
+  coeficientes <- summary(mejor)$coefficients
+  
+  tibble(
+    Relacion = dependiente,
+    Dummies = ifelse(length(dummies_fijas) > 0, paste(dummies_fijas, collapse = ", "), "Ninguna"),
+    Tendencia = ifelse(tendencia, "Sí", "No"),
+    ARDL = paste0("(", paste(modelo$top_orders[1, seq_along(c(dependiente, regresores))], collapse = ","), ")"),
+    BIC = modelo$top_orders$BIC[1],
+    Caso_F_restringido = casos[1],
+    F_restringido = f_restringido$statistic,
+    Valor_p_F_restringido = f_restringido$p.value,
+    F_libre = f_libre$statistic,
+    Valor_p_F_libre = f_libre$p.value,
+    t_libre = prueba_t$statistic,
+    Valor_p_t = prueba_t$p.value,
+    Largo_plazo = paste(sprintf("%s = %.3f", largo_plazo$Term[-1], largo_plazo$Estimate[-1]), collapse = "; "),
+    # [Rev. 2026-09-19] Valor-p de la hipótesis de elasticidad unitaria (y = 1 en MD; y_usa = 1 en OUT)
+    Valor_p_elasticidad = if (is.null(termino_unitario)) NA_real_ else {
+      i <- which(largo_plazo$Term == termino_unitario)
+      2 * (1 - pnorm(abs((largo_plazo$Estimate[i] - 1)/largo_plazo$`Std. Error`[i])))
+    },
+    Valor_p_dummies = ifelse(length(dummies_fijas) > 0,
+                             paste(sprintf("%s: %.3f", dummies_fijas, coeficientes[dummies_fijas, 4]), collapse = "; "),
+                             "")
+  )
+}
+
+datos_especificacion <- datos_ardl %>% 
+  left_join(dummies_bp, by = "Periodo")
+
+# [Rev. 2026-09-19] Se agregan las configuraciones con escalón permanente de pandemia
+d_covid <- c("D202", "D203")
+d_escalon <- "S2002"
+d_covid_completo <- c("S2002", "D202", "D203")
+d_bp_out <- nombre_escalon(quiebres_out)
+d_bp_md <- nombre_escalon(quiebres_md)
+
+especificaciones <- bind_rows(
+  tibble(dependiente = "y", dummies_fijas = list(character(0), d_covid, d_escalon, d_covid_completo,
+                                                 dummies_escalon, c(dummies_escalon, d_covid),
+                                                 c(dummies_escalon, d_covid_completo), d_bp_out, c(d_bp_out, d_covid))),
+  tibble(dependiente = "m", dummies_fijas = list(character(0), d_covid, d_escalon, d_covid_completo,
+                                                 c(dummies_escalon, d_covid_completo), d_bp_md, c(d_bp_md, d_covid)))
+) %>% 
+  crossing(tendencia = c(FALSE, TRUE))
+
+comparacion_ardl <- especificaciones %>% 
+  pmap_dfr(function(dependiente, dummies_fijas, tendencia) {
+    regresores <- if (dependiente == "y") "y_usa" else c("y", "r")
+    termino_unitario <- if (dependiente == "y") "y_usa" else "y"
+    comparar_ardl(dependiente, regresores, dummies_fijas, tendencia, datos_especificacion, termino_unitario)
+  })
+
+print(comparacion_ardl %>% dplyr::select(Relacion:Valor_p_t), n = Inf, width = Inf)
+print(comparacion_ardl %>% dplyr::select(Relacion, Dummies, Tendencia, Largo_plazo, Valor_p_elasticidad, Valor_p_dummies), n = Inf, width = Inf)
+
+# [Rev. 2026-09-15] Lectura de resultados (con los datos actuales: Cetes 28 días y sin TED):
+# - Tendencia: el BIC nunca la prefiere en OUT y en MD la diferencia es mínima (-543.5 vs. -543.7), lo que coincide con CCH (sin tendencia).
+# - OUT: D091, D121 y D151 no son significativas en ninguna especificación (valores-p > 0.26), por lo que no se sostienen en 2000-2025.
+#   Las dummies de la pandemia sí son significativas y el BIC elige esa especificación (-616), pero entonces ninguna prueba de límites
+#   rechaza la nula (F caso 2 = 1.69, valor-p = 0.54). Sin dummies, sólo la F con constante restringida rechaza (8.36; t no rechaza).
+#   Conclusión: la relación de largo plazo entre y e y_usa no se sostiene en la muestra nueva (CCH, pie de página 13, ya advertían su debilitamiento después de 2009).
+# - MD: con las dummies de la pandemia, la F rechaza en los casos 2 y 3 pero la t no: resultado no concluyente.
+# [Rev. 2026-09-19] Con escalón: OUT sólo con S2002 da elasticidad 0.965 (no rechaza 1) y S2002 significativa (0.001);
+# con tendencia, 1.003. MD mejora mucho si además se agregan los escalones de CCH (t = -5.60), pero esos escalones no están
+# en la ecuación de dinero de CCH, así que el modelo principal de MD se deja sin ellos y se reporta como robustez.
+#   Con los escalones de Bai-Perron más la pandemia rechazan todas las pruebas (t = -3.90, valor-p = 0.018), pero el BIC empeora y
+#   las fechas provienen de los mismos datos; se reporta sólo como evidencia exploratoria.
+
+```
+
+Graficar el ARDL
+
+```{r}
+
+library(ARDL)
+library(ggplot2)
+
+# ---- 1. Relaciones de cointegración ----
+Eq_ppp <- coint_eq(uecm_ppp, case = 2)
+Eq_UIP <- coint_eq(uecm_uip, case = 2)
+Eq_MD  <- coint_eq(uecm_md,  case = 2)
+Eq_OUT <- coint_eq(uecm_out, case = 2)
+
+# ---- 2. Función de graficación (eje doble, mismo formato) ----
+grafica_eq <- function(serie_1, serie_2,
+                       nombre_1, nombre_2,
+                       titulo, subtitulo,
+                       inicio = as.Date("2000-10-01"),   # 2000T4: inicio de serie_1
+                       col_1 = "darkblue", col_2 = "steelblue") {
+
+  n_total <- length(serie_1)
+  n_eq    <- length(serie_2)
+  if (n_eq > n_total) stop("serie_2 es más larga que serie_1; revisa los datos.")
+
+  # Recorte al tramo que cubre la relación de equilibrio (se pierden las primeras obs.)
+  fechas <- seq(inicio, by = "quarter", length.out = n_total)
+  idx    <- (n_total - n_eq + 1):n_total
+
+  datos <- data.frame(
+    fecha = fechas[idx],
+    s1    = as.numeric(serie_1)[idx],
+    s2    = as.numeric(serie_2)
+  )
+
+  # Rangos: cada serie ocupa todo su eje, con 5% de margen
+  r1 <- range(datos$s1, na.rm = TRUE); r2 <- range(datos$s2, na.rm = TRUE)
+  prim_min <- r1[1] - diff(r1) * 0.05; prim_max <- r1[2] + diff(r1) * 0.05
+  sec_min  <- r2[1] - diff(r2) * 0.05; sec_max  <- r2[2] + diff(r2) * 0.05
+
+  # Transformación lineal: sec -> primario
+  a <- (prim_max - prim_min) / (sec_max - sec_min)
+  b <- prim_min - a * sec_min
+
+  lab_1 <- paste0(nombre_1, " (eje izq.)")
+  lab_2 <- paste0(nombre_2, " (eje der.)")
+
+  ggplot(datos, aes(x = fecha, group = 1)) +
+    geom_line(aes(y = s1,         color = lab_1), linewidth = 0.8, linetype = "solid") +
+    geom_line(aes(y = s2 * a + b, color = lab_2), linewidth = 0.8, linetype = "dashed") +
+    scale_y_continuous(
+      name = "logaritmos",
+      sec.axis = sec_axis(~ (. - b) / a, name = "logaritmos")
+    ) +
+    coord_cartesian(ylim = c(prim_min, prim_max)) +
+    scale_x_date(
+      breaks = seq(as.Date(format(min(datos$fecha), "%Y-01-01")),
+                   max(datos$fecha), by = "4 years"),
+      labels = function(x) format(x, "%Y")
+    ) +
+    labs(title = titulo, 
+         subtitle = subtitulo, 
+         caption  = "**Fuente:** Cálculos propios.",
+         x = NULL, color = " ") +
+    scale_color_manual(values = setNames(c(col_1, col_2), c(lab_1, lab_2))) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "bottom",
+      legend.justification = c(0.5, 1),
+      legend.margin = margin(t = -5, unit = "pt"),
+      legend.background = element_rect(fill = "white", color = "white"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(face = "italic", hjust = 0.5),
+      plot.caption  = element_markdown(size = 10, hjust = 0),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      axis.line = element_line(color = "black"),
+      axis.ticks = element_line(color = "black"),
+      axis.text = element_text(color = "black"),
+      panel.grid = element_blank()
+    )
+}
+
+# ---- 3. Configuración de las cuatro gráficas ----
+# col = nombre de la columna de Ldatos que va en el eje izquierdo
+relaciones <- list(
+  list(col = "p", eq = Eq_ppp, nombre = "p_t", eq_nombre = "Eq. PPP",
+       titulo = "Gráfica 4.1",
+       subtitulo = "Nivel de precios y relación de equilibrio de PPP (ARDL)"),
+
+  list(col = "e", eq = Eq_UIP, nombre = "e_t", eq_nombre = "Eq. UIP",       # <- ajusta "e"
+       titulo = "Gráfica 4.2",
+       subtitulo = "Tipo de cambio y relación de equilibrio de UIP (ARDL)"),
+
+  list(col = "m", eq = Eq_MD,  nombre = "m_t", eq_nombre = "Eq. MD",        # <- ajusta "m"
+       titulo = "Gráfica 4.3",
+       subtitulo = "Agregado monetario y relación de equilibrio de demanda de dinero (ARDL)"),
+
+  list(col = "y", eq = Eq_OUT, nombre = "y_t", eq_nombre = "Eq. OUT",
+       titulo = "Gráfica 4.4",
+       subtitulo = "PIB de México y relación de equilibrio ingreso doméstico-externo (ARDL)")
+)
+
+# ---- 4. Generar las cuatro gráficas ----
+graficas_eq <- lapply(relaciones, function(r) {
+  if (!r$col %in% names(Ldatos))
+    stop("No existe la columna '", r$col, "' en Ldatos. Ajusta 'col' en la lista 'relaciones'.")
+  grafica_eq(Ldatos[[r$col]], r$eq,
+             nombre_1 = r$nombre, nombre_2 = r$eq_nombre,
+             titulo = r$titulo, subtitulo = r$subtitulo)
+})
+
+graficas_eq[[1]]   # PPP
+graficas_eq[[2]]   # UIP
+graficas_eq[[3]]   # MD
+graficas_eq[[4]]   # OUT
+
+# ---- 5. (Opcional) Guardar cada gráfica ----
+for (i in seq_along(graficas_eq))
+   ggsave(sprintf("grafica_%d.png", 10 + i), graficas_eq[[i]],
+          width = 7, height = 4.5, dpi = 300, bg = "white")
+
+# ---- 6. (Opcional) Las cuatro en una cuadrícula 2x2 ----
+# library(patchwork)
+# wrap_plots(graficas_eq, ncol = 2)
+
+```
+
+
+#Bloque 4: Rango de cointegración
+
+Primero se selecciona el número de rezagos óptimos del VAR subyacente
+
+```{r}
+
+# [Rev. 2026-09-15] Exógenas en primeras diferencias con un rezago y dummies, como en CCH (2017, p. 13)
+# Original: datos_var_sub<- Ldatos %>% 
+# Original:   mutate(
+# Original:     dif_e = e - lag(e),
+# Original:     ti = p_usa + e) %>% 
+# Original:   slice(-1)
+datos_var_sub<- Ldatos %>% 
+  left_join(dummies, by = "Periodo") %>% 
+  mutate(
+    dif_e = e - lag(e),
+    ti = p_usa + e,
+    d_wti_l1 = lag(wti - lag(wti)),
+    d_pp_usa_l1 = lag(pp_usa - lag(pp_usa)),
+    d_ted_l1 = lag(ted - lag(ted))) %>% 
+  slice(-(1:2))
+
+
+
+# 1. Definir nombres de las variables endógenas y exógenas
+vars_endogenas <- c("y", "p", "dif_e", "r", "m", "y_usa", "r_usa", "ti")
+# [Rev. 2026-09-15] Exógenas en diferencias rezagadas y dummies
+# Original: vars_exogenas  <- c("pp_usa", "wti")
+# [Rev. 2026-09-18] Se agrega el diferencial de financiamiento, como en CCH (2017, p. 5)
+vars_exogenas  <- c("d_pp_usa_l1", "d_wti_l1", "d_ted_l1", dummies_escalon, dummies_covid)
+
+
+# 3. Convertir a matrices/data.frames numéricos
+y_mat <- as.matrix(datos_var_sub[, vars_endogenas])
+x_mat <- as.matrix(datos_var_sub[, vars_exogenas])
+
+# 4. Ejecutar VARselect con variables exógenas
+seleccion_rezagos <- VARselect(
+  y = y_mat,
+  # [Rev. 2026-09-15] CCH (2017, Tabla 4) evalúan de 1 a 4 rezagos
+  # Original: lag.max = 6,          # Máximo de rezagos a evaluar
+  lag.max = 4,          # Máximo de rezagos a evaluar
+  type = "const",       # "const", "trend", "both" o "none"
+  exogen = x_mat
+)
+
+# Rezagos óptimos sugeridos por AIC, HQ, SC/BIC y FPE
+print(seleccion_rezagos$selection)
+
+# Valores de los criterios para cada rezago (p = 1 hasta lag.max)
+print(round(seleccion_rezagos$criteria, 4))
+
+```
+
+Ahora se estima el VAR subyacente en niveles ("logaritmos") basado en un modelo con constante y tendencia. Esta decisión se basa en el hecho de que, las pruebas Dickey-Fuller-Aumentadas con constante y tendencia mostraban que las series son estacionarias.
+
+[Rev. 2026-09-15] CCH (2017, p. 13) eligen p = 2 (HQ y FPE) y no encuentran tendencia lineal en las relaciones de largo plazo (p. 9), por lo que el VAR se estima con p = 2 y constante, coherente con `ca.jo(K = 2)`. Además, las pruebas ADF del Bloque 2 original se aplicaban a las primeras diferencias, no a los niveles.
+
+```{r}
+
+# [Rev. 2026-09-15] p = 2 y constante (CCH, 2017, p. 13)
+# Original: var_sub<- VAR(y_mat, p=1, type = "both", exogen = x_mat)
+var_sub<- VAR(y_mat, p=2, type = "const", exogen = x_mat)
+
+```
+
+Realizar la prueba de la traza
+
+```{r}
+
+prueba_traza_const <- ca.jo(
+  x = y_mat,
+  type = "trace",
+  ecdet = "const",
+  K = 2,
+  dumvar = x_mat
+)
+
+# 4. Ver resultados completos y valores críticos
+summary(prueba_traza_const)
+
+
+# [Rev. 2026-09-15, segunda ronda] Con dummies y exógenas en diferencias: cinco vectores al 5% (r <= 5: 34.40 < 34.91).
+# Los valores críticos asintóticos no son válidos con dummies ni exógenas débiles; ver la traza del sistema parcial al final.
+# [Rev. 2026-09-15] Con los datos corregidos se mantienen tres vectores de cointegración al 5% y al 10% (r <= 3: 68.59 < 76.07)
+# Original: #Se encontraron solo tres vectores de cointegración 
+
+
+```
+
+
+```{r}
+
+prueba_traza_trend <- ca.jo(
+  x = y_mat,
+  type = "trace",
+  ecdet = "trend",
+  K = 2,
+  dumvar = x_mat
+)
+
+# 4. Ver resultados completos y valores críticos
+summary(prueba_traza_trend)
+
+
+# [Rev. 2026-09-15, segunda ronda] Con dummies y exógenas en diferencias: cinco vectores al 5% y al 10% (r <= 5: 38.79 < 39.06).
+# CCH no incluyen tendencia en las relaciones de largo plazo; esta especificación queda como referencia.
+# [Rev. 2026-09-15] Con los datos corregidos hay cuatro vectores de cointegración al 5% y al 10% (r <= 3: 94.13 > 87.31; r <= 4: 56.91 < 62.99)
+# Original: #Se encontraron solo tres vectores de cointegración al 5% pero al 10% sí existen cuatro vectores de cointegración
+
+
+```
+
+Exogeneidad débil de `y_usa` y `r_usa`
+
+CCH (2017, p. 5 y 13) tratan al PIB y a la tasa de interés de EE.UU. como débilmente exógenos: no responden a los términos de corrección de error. Primero se prueba la restricción sobre las cargas α en el sistema completo con cuatro vectores de cointegración.
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: prueba LR de exogeneidad débil (Johansen, 1995) con r = 4
+pos_exogenas_debiles <- which(vars_endogenas %in% c("y_usa", "r_usa"))
+A_exogeneidad <- diag(length(vars_endogenas))[, -pos_exogenas_debiles]
+
+prueba_exogeneidad <- alrtest(z = prueba_traza_const, A = A_exogeneidad, r = 4)
+summary(prueba_exogeneidad)
+
+# [Rev. 2026-09-15] LR = 37.15 con 8 g.l. (valor-p < 0.001): se rechaza la exogeneidad débil conjunta de y_usa y r_usa con r = 4.
+# CCH prueban esta restricción junto con las de sobreidentificación usando valores críticos bootstrap (LR = 93.56 con 23 restricciones).
+
+```
+
+Prueba de la traza del sistema parcial con valores críticos simulados (réplica de la Tabla 5 de CCH)
+
+Las variables endógenas son `y, p, dif_e, r, m, ti` y las débilmente exógenas `y_usa, r_usa`. La constante y los escalones entran restringidos al espacio de cointegración; sus diferencias, los impulsos y las exógenas en diferencias entran sin restricción. Como los valores críticos usuales no aplican con dummies y exógenas débiles, se simulan con caminatas aleatorias independientes, como en CCH (2017, pie de página 17).
+
+```{r}
+
+# [Rev. 2026-09-15] Nuevo chunk: traza del sistema parcial (Harbo et al., 1998)
+traza_sistema_parcial <- function(x, x_exo, D_restr, U, k = 2) {
+  
+  # 1. Construir las matrices del VECM condicional
+  n <- ncol(x)
+  m <- ncol(x_exo)
+  z <- cbind(x, x_exo)
+  T <- nrow(z)
+  dz <- diff(z)
+  dD <- diff(D_restr)
+  t_idx <- (k + 1):T
+  
+  Y0 <- dz[t_idx - 1, 1:n, drop = FALSE]                             # Δx_t
+  Z1 <- cbind(z[t_idx - 1, ], 1, D_restr[t_idx - 1, , drop = FALSE])  # z_t-1, constante y escalones (restringidos)
+  Z2 <- cbind(dz[t_idx - 1, (n + 1):(n + m), drop = FALSE],           # Δx*_t
+              dD[t_idx - 1, , drop = FALSE],                          # ΔD_t
+              U[t_idx, , drop = FALSE])                               # Impulsos y exógenas
+  for (i in seq_len(k - 1)) Z2 <- cbind(Z2, dz[t_idx - 1 - i, , drop = FALSE]) # Δz_t-i
+  
+  # 2. Regresión de rango reducido
+  R0 <- qr.resid(qr(Z2), Y0)
+  R1 <- qr.resid(qr(Z2), Z1)
+  T_ef <- length(t_idx)
+  S00 <- crossprod(R0)/T_ef
+  S11 <- crossprod(R1)/T_ef
+  S01 <- crossprod(R0, R1)/T_ef
+  
+  autovalores <- eigen(solve(S11, t(S01)) %*% solve(S00, S01), only.values = TRUE)$values
+  autovalores <- sort(Re(autovalores), decreasing = TRUE)[1:n]
+  
+  tibble(
+    Rango = 0:(n - 1),
+    Autovalor = autovalores,
+    Traza = sapply(0:(n - 1), function(r) -T_ef * sum(log(1 - autovalores[(r + 1):n])))
+  )
+}
+
+# 3. Datos del sistema parcial
+x_endogenas <- as.matrix(datos_var_sub[, c("y", "p", "dif_e", "r", "m", "ti")])
+x_debil_exogenas <- as.matrix(datos_var_sub[, c("y_usa", "r_usa")])
+# [Rev. 2026-09-19] El escalón de pandemia se restringe al espacio de cointegración; los impulsos quedan libres
+# Original: D_restringidas <- as.matrix(datos_var_sub[, dummies_escalon])
+# Original: U_libres <- as.matrix(datos_var_sub[, c(dummies_covid, "d_wti_l1", "d_pp_usa_l1", "d_ted_l1")])
+D_restringidas <- as.matrix(datos_var_sub[, c(dummies_escalon, dummies_covid_escalon)])
+U_libres <- as.matrix(datos_var_sub[, c(dummies_covid_impulso, "d_wti_l1", "d_pp_usa_l1", "d_ted_l1")])
+
+traza_parcial <- traza_sistema_parcial(x_endogenas, x_debil_exogenas, D_restringidas, U_libres, k = 2)
+
+# 4. Valores críticos simulados: bajo H0 (rango r) hay n - r tendencias comunes
+set.seed(2017)
+n_rep <- 5000 # <- CCH usan 5,000 repeticiones
+n_end <- ncol(x_endogenas)
+T_obs <- nrow(x_endogenas)
+
+traza_simulada <- sapply(0:(n_end - 1), function(r0) {
+  replicate(n_rep, {
+    n_libres <- n_end - r0
+    x_sim <- apply(matrix(rnorm(T_obs * n_libres), ncol = n_libres), 2, cumsum)
+    x_exo_sim <- apply(matrix(rnorm(T_obs * 2), ncol = 2), 2, cumsum)
+    traza_sistema_parcial(x_sim, x_exo_sim, D_restringidas, U_libres, k = 2)$Traza[1]
+  })
+})
+
+tabla5 <- traza_parcial %>%
+  mutate(
+    CV_95 = apply(traza_simulada, 2, quantile, probs = 0.95),
+    Valor_p = sapply(seq_along(Traza), function(i) mean(traza_simulada[, i] >= Traza[i])),
+    Traza_CCH = c(393.35, 213.67, 134.28, 77.55, 29.95, 6.41),
+    CV_95_CCH = c(170.23, 134.28, 101.28, 72.46, 46.75, 24.34),
+    Valor_p_CCH = c(0.00, 0.00, 0.00, 0.02, 0.56, 0.93)
+  )
+
+print(tabla5, width = Inf)
+
+# [Rev. 2026-09-19] Con el escalón de pandemia restringido al espacio de cointegración, el rango sube a cuatro
+# (valores-p 0, 0.002, 0.012, 0.048, 0.205, 0.442), el mismo número que encuentran CCH. Advertencia: r <= 3 queda
+# justo en el límite del 5% (0.048), y con 2,000 repeticiones en el chunk de sensibilidad el mismo caso da tres vectores.
+
+# [Rev. 2026-09-18] Con Cetes a 91 días y el diferencial: trazas 276.5, 178.0, 119.4, 70.4, 36.3, 14.9 y valores-p 0, 0.025, 0.111,
+# 0.375, 0.579, 0.563. Se rechaza r = 0 y r <= 1, pero no r <= 2: dos vectores de cointegración al 5% y al 10%. CCH encuentran cuatro.
+# [Rev. 2026-09-15] Con Cetes a 28 días eran dos al 5% y tres al 10% (valor-p de r <= 2 = 0.062).
+
+```
+
+Sensibilidad del rango de cointegración a las variables dicotómicas
+
+Los escalones entran restringidos al espacio de cointegración y los impulsos de la pandemia sin restricción, de modo que la elección de dummies puede alterar el rango estimado. Se repite la prueba de la traza del sistema parcial con cinco configuraciones, cada una con sus propios valores críticos simulados.
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: rango de cointegración y rezagos del VAR según el juego de dummies
+datos_sensibilidad <- datos_var_sub %>% 
+  left_join(dummies_bp, by = "Periodo")
+
+exogenas_corto_plazo <- c("d_wti_l1", "d_pp_usa_l1", "d_ted_l1")
+
+configuraciones <- list(
+  "Sin dummies"              = list(escalones = character(0),  impulsos = character(0)),
+  "Sólo pandemia"            = list(escalones = character(0),  impulsos = c("D202", "D203")),
+  "CCH (actual)"             = list(escalones = dummies_escalon, impulsos = c("D202", "D203")),
+  "CCH sin pandemia"         = list(escalones = dummies_escalon, impulsos = character(0)),
+  "Bai-Perron MD + pandemia" = list(escalones = nombre_escalon(quiebres_md), impulsos = c("D202", "D203")),
+  # [Rev. 2026-09-19] Configuraciones con el escalón permanente de pandemia
+  "CCH + escalón 2020T2"     = list(escalones = c(dummies_escalon, "S2002"), impulsos = character(0)),
+  "CCH + escalón + impulsos" = list(escalones = c(dummies_escalon, "S2002"), impulsos = c("D202", "D203")),
+  "Sólo escalón 2020T2"      = list(escalones = "S2002", impulsos = character(0))
+)
+
+set.seed(2017)
+n_rep_sensibilidad <- 2000 # <- Menos repeticiones que en la Tabla 5 porque son cinco configuraciones
+
+sensibilidad_rango <- imap_dfr(configuraciones, function(cfg, nombre) {
+  
+  D <- if (length(cfg$escalones) > 0) as.matrix(datos_sensibilidad[, cfg$escalones]) else matrix(0, nrow(x_endogenas), 0)
+  U <- as.matrix(datos_sensibilidad[, c(cfg$impulsos, exogenas_corto_plazo)])
+  
+  observado <- traza_sistema_parcial(x_endogenas, x_debil_exogenas, D, U, k = 2)
+  
+  simulado <- sapply(0:(ncol(x_endogenas) - 1), function(r0) {
+    n_libres <- ncol(x_endogenas) - r0
+    replicate(n_rep_sensibilidad, {
+      x_sim <- apply(matrix(rnorm(nrow(x_endogenas) * n_libres), ncol = n_libres), 2, cumsum)
+      x_exo_sim <- apply(matrix(rnorm(nrow(x_endogenas) * 2), ncol = 2), 2, cumsum)
+      traza_sistema_parcial(x_sim, x_exo_sim, D, U, k = 2)$Traza[1]
+    })
+  })
+  
+  rezagos <- VARselect(y_mat, lag.max = 4, type = "const",
+                       exogen = as.matrix(datos_sensibilidad[, c(cfg$escalones, cfg$impulsos, exogenas_corto_plazo)]))$selection
+  
+  observado %>% 
+    mutate(Configuracion = nombre,
+           CV_95 = apply(simulado, 2, quantile, probs = 0.95),
+           Valor_p = sapply(seq_along(Traza), function(i) mean(simulado[, i] >= Traza[i])),
+           Rango_5pct = sum(Valor_p < 0.05),
+           VAR_AIC = rezagos["AIC(n)"], VAR_HQ = rezagos["HQ(n)"], VAR_FPE = rezagos["FPE(n)"]) %>% 
+    dplyr::select(Configuracion, everything())
+})
+
+print(sensibilidad_rango %>% dplyr::select(Configuracion, Rango, Traza, CV_95, Valor_p), n = Inf, width = Inf)
+
+print(sensibilidad_rango %>% 
+        group_by(Configuracion) %>% 
+        summarise(Rango_5pct = first(Rango_5pct), VAR_AIC = first(VAR_AIC), VAR_HQ = first(VAR_HQ), VAR_FPE = first(VAR_FPE)),
+      width = Inf)
+
+# [Rev. 2026-09-19] Resultado: la forma de modelar la pandemia es lo que mueve el rango.
+# Sin dummies o sin pandemia: 1 vector. Con impulsos: 2. Con escalón permanente (solo, con CCH o con CCH + impulsos): 3,
+# y con 5,000 repeticiones (Tabla 5) el caso "CCH + escalón + impulsos" llega a 4, el rango de CCH.
+# Los escalones de CCH y los de Bai-Perron son indiferentes; HQ y FPE eligen p = 2 en las ocho configuraciones.
+
+```
+
+#Bloque 5: Estimación del VECM con las restricciones de largo plazo
+
+Se imponen las restricciones de sobreidentificación de CCH (2017, ec. 3.1) sobre el espacio de cointegración: PPP (p = p_usa + e), UIP (dif_e = r - r_usa), MD (m = y + br·r, con br libre) y OUT (y = y_usa). Como las dicotómicas entran en `dumvar` y no en el espacio de cointegración, las de MD y OUT quedan fuera de las restricciones. También se prueba la exogeneidad débil de `y_usa` y `r_usa`.
+
+Los valores críticos asintóticos no son fiables con esta dimensión y tamaño de muestra: CCH obtienen un LR de 93.56 con valores críticos bootstrap de 148.95 al 5%, cuando el asintótico sería de alrededor de 35. Por eso se simulan los valores críticos con bootstrap paramétrico, como en CCH (2017, p. 14).
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: restricciones de largo plazo y pruebas LR
+rango_vecm <- 4 # <- Rango sugerido por la traza del sistema parcial con escalón e impulsos
+
+vars_beta <- c(vars_endogenas, "constant")
+
+matriz_restricciones <- function(columnas) {
+  H <- matrix(0, length(vars_beta), length(columnas))
+  rownames(H) <- vars_beta
+  for (j in seq_along(columnas)) {
+    for (nombre in names(columnas[[j]])) H[nombre, j] <- columnas[[j]][[nombre]]
+  }
+  H
+}
+
+# Espacio generado por las cuatro relaciones teóricas, con la semielasticidad de la tasa libre en MD
+H_cch <- matriz_restricciones(list(
+  c(p = 1, ti = -1),               # PPP: p = p_usa + e
+  c(dif_e = 1, r = -1, r_usa = 1), # UIP: dif_e = r - r_usa
+  c(m = 1, y = -1),                # MD: m - y ...
+  c(r = 1),                        #     ... con br libre
+  c(y = 1, y_usa = -1),            # OUT: y = y_usa
+  c(constant = 1)
+))
+
+prueba_beta <- blrtest(prueba_traza_const, H = H_cch, r = rango_vecm)
+prueba_alpha <- alrtest(prueba_traza_const, A = A_exogeneidad, r = rango_vecm)
+
+summary(prueba_beta)
+
+```
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: valores críticos por bootstrap paramétrico del modelo restringido
+simular_vecm <- function(objeto, r) {
+  
+  # 1. Coeficientes del modelo restringido (urca usa los niveles rezagados en t-K, con K = 2)
+  ajuste <- cajorls(objeto, r = r)
+  coeficientes <- coef(ajuste$rlm)
+  beta_restringido <- ajuste$beta
+  Sigma <- crossprod(residuals(ajuste$rlm))/nrow(residuals(ajuste$rlm))
+  
+  # 2. Simulación recursiva con las exógenas y dicotómicas observadas
+  T_obs <- nrow(y_mat)
+  k <- ncol(y_mat)
+  dz_obs <- diff(y_mat)
+  z <- matrix(NA, T_obs, k)
+  z[1:2, ] <- y_mat[1:2, ]
+  dz <- matrix(NA, T_obs - 1, k)
+  dz[1, ] <- dz_obs[1, ]
+  innovaciones <- matrix(rnorm((T_obs - 2) * k), ncol = k) %*% chol(Sigma)
+  
+  for (t in 3:T_obs) {
+    ect <- as.numeric(c(z[t - 2, ], 1) %*% beta_restringido)
+    dz[t - 1, ] <- as.numeric(c(ect, x_mat[t, ], dz[t - 2, ]) %*% coeficientes) + innovaciones[t - 2, ]
+    z[t, ] <- z[t - 1, ] + dz[t - 1, ]
+  }
+  
+  colnames(z) <- colnames(y_mat)
+  z
+}
+
+# [Rev. 2026-09-19] La función recibe la prueba como argumento y tolera repeticiones que no convergen
+valores_criticos_lr <- function(objeto, r, calcular_lr, n_rep) {
+  replicate(n_rep, {
+    z_sim <- simular_vecm(objeto, r)
+    cj_sim <- ca.jo(z_sim, type = "trace", ecdet = "const", K = 2, dumvar = x_mat)
+    # El algoritmo iterativo de bh6lrtest no siempre converge con datos simulados: esas repeticiones se descartan
+    tryCatch(suppressWarnings(as.numeric(calcular_lr(cj_sim, r))), error = function(e) NA_real_)
+  })
+}
+
+lr_de_beta <- function(cj_sim, r) blrtest(cj_sim, H = H_cch, r = r)@teststat
+lr_de_alpha <- function(cj_sim, r) alrtest(cj_sim, A = A_exogeneidad, r = r)@teststat
+
+set.seed(2017)
+n_rep_bootstrap <- 1000 # <- CCH usan 1,000 repeticiones
+
+lr_beta_boot <- valores_criticos_lr(prueba_beta, rango_vecm, lr_de_beta, n_rep_bootstrap)
+lr_alpha_boot <- valores_criticos_lr(prueba_alpha, rango_vecm, lr_de_alpha, n_rep_bootstrap)
+
+gl_beta <- (length(vars_beta) - ncol(H_cch)) * rango_vecm
+gl_alpha <- 2 * rango_vecm
+
+resultados_lr <- tibble(
+  Prueba = c("Restricciones de largo plazo (beta)", "Exogeneidad débil de y_usa y r_usa (alfa)"),
+  LR = c(as.numeric(prueba_beta@teststat), as.numeric(prueba_alpha@teststat)),
+  Grados_libertad = c(gl_beta, gl_alpha),
+  Valor_p_asintotico = c(1 - pchisq(as.numeric(prueba_beta@teststat), gl_beta),
+                         1 - pchisq(as.numeric(prueba_alpha@teststat), gl_alpha)),
+  CV_bootstrap_5pct = c(quantile(lr_beta_boot, 0.95, na.rm = TRUE), quantile(lr_alpha_boot, 0.95, na.rm = TRUE)),
+  CV_bootstrap_10pct = c(quantile(lr_beta_boot, 0.90, na.rm = TRUE), quantile(lr_alpha_boot, 0.90, na.rm = TRUE)),
+  Valor_p_bootstrap = c(mean(lr_beta_boot >= as.numeric(prueba_beta@teststat), na.rm = TRUE),
+                        mean(lr_alpha_boot >= as.numeric(prueba_alpha@teststat), na.rm = TRUE)),
+  Repeticiones_validas = c(sum(!is.na(lr_beta_boot)), sum(!is.na(lr_alpha_boot)))
+)
+
+print(resultados_lr, width = Inf)
+
+# [Rev. 2026-09-19] Resultados:
+# - Restricciones de largo plazo: LR = 109.0 con valor crítico bootstrap de 48.4 al 5% (asintótico chi2(12) ~ 21).
+#   El bootstrap más que duplica el valor crítico, pero el estadístico sigue muy por encima: las restricciones de CCH
+#   se rechazan con esta muestra. En CCH no se rechazaban (LR = 93.56 contra 148.95).
+# - Exogeneidad débil de y_usa y r_usa: LR = 32.0 con valor crítico bootstrap de 67.2 (valor-p = 0.82): NO se rechaza,
+#   al contrario de lo que indica el asintótico (valor-p = 0.0001). Es justo la corrección por la que CCH usan bootstrap.
+# Conclusión: el supuesto de exogeneidad débil se sostiene, pero el conjunto de relaciones teóricas de largo plazo no.
+
+```
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: vectores de cointegración estimados sin restringir, para comparar con la teoría
+vectores_estimados <- prueba_traza_const@V[, 1:rango_vecm]
+normalizacion <- c(2, 3, 5, 1) # p, dif_e, m, y
+
+print(round(sapply(seq_len(rango_vecm), function(j) vectores_estimados[, j]/vectores_estimados[normalizacion[j], j]), 3))
+
+```
+
+#Bloque 6: Tres escenarios para el VECM (decisión de Víctor)
+
+Esta sección existe porque el Bloque 5 dejó un problema abierto y su solución **no es una cuestión técnica, sino de qué quiere responder la tesis**. Los tres escenarios están estimados y probados; la elección es de quien escribe la tesis.
+
+**El problema.** El VECM tiene dos partes. La de corto plazo (cómo responden las variables trimestre a trimestre) se estima siempre sin restricciones. La de largo plazo es la matriz β, que contiene las relaciones de equilibrio hacia las que el sistema tiende. CCH (2017) no dejan que los datos elijan β: le imponen las cuatro relaciones de la teoría (ec. 3.1). Esa imposición es la que se rechaza con nuestra muestra (Bloque 5). Hay entonces tres caminos.
+
+**Escenario A: β sin restricciones.** Se estiman cuatro vectores de cointegración y se deja que los datos determinen su contenido.
+
+- Ventaja: no impone nada que los datos rechacen.
+- Desventaja: los vectores no son interpretables. La normalización que reporta el paquete es mecánica (un 1 en la diagonal), no económica: no hay "una ecuación de PPP" ni "una de demanda de dinero", sólo cuatro combinaciones lineales estacionarias.
+- Qué permite después: las funciones impulso-respuesta se pueden calcular igual, porque el choque de política monetaria se identifica con el orden de Cholesky del Bloque 4, que no depende de β. Lo que se pierde es la lectura de largo plazo (no se puede decir "el tipo de cambio converge a la PPP").
+
+**Escenario B: se imponen sólo UIP y OUT.** Son las dos relaciones que las estimaciones uniecuacionales sí respaldan (Bloque 3): UIP tiene relación de nivel con coeficientes que no rechazan 1 y −1, y OUT, con el escalón de la pandemia, tiene elasticidad 0.885, que no rechaza la unidad. Las otras dos relaciones quedan libres.
+
+- Ventaja: conserva la relación central para la hipótesis de Dornbusch. La sobre-reacción del tipo de cambio es, precisamente, el mecanismo por el cual una subida de la tasa de interés doméstica aprecia la moneda por encima de su valor de largo plazo hasta que la depreciación esperada satisface la UIP. Sin la UIP en el modelo, la interpretación estructural se debilita.
+- Desventaja: se aparta de CCH en dos relaciones (PPP y demanda de dinero), y hay que justificar por qué.
+- Qué permite después: todo el análisis de CCH, señalando que PPP y demanda de dinero no se sostienen en 2000-2025.
+
+**Escenario C: las cuatro relaciones de CCH.** Réplica literal del paper.
+
+- Ventaja: comparabilidad total con CCH; la tesis puede presentar sus cuadros en el mismo formato.
+- Desventaja: los datos rechazan las restricciones, así que el modelo está mal especificado en el largo plazo y las impulso-respuesta heredan ese problema.
+- Qué permite después: reportar el rechazo **como resultado de la tesis**: "las relaciones de largo plazo de CCH ya no se sostienen con datos 2000-2025".
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: estimación de los tres escenarios
+# Escenario B: sólo UIP y OUT restringidas; los otros dos vectores quedan libres
+H_uip_out <- matriz_restricciones(list(
+  c(dif_e = 1, r = -1, r_usa = 1), # UIP: dif_e = r - r_usa
+  c(y = 1, y_usa = -1),            # OUT: y = y_usa
+  c(constant = 1)
+))
+
+escenario_a <- prueba_traza_const                                    # Sin restricciones
+escenario_b <- bh6lrtest(prueba_traza_const, H = H_uip_out, r = rango_vecm, r1 = 2,
+                         conv.val = 1e-4, max.iter = 200)            # Dos vectores restringidos
+escenario_c <- prueba_beta                                           # Las cuatro relaciones (Bloque 5)
+
+ajuste_a <- cajorls(escenario_a, r = rango_vecm)
+ajuste_b <- cajorls(escenario_b, r = rango_vecm)
+ajuste_c <- cajorls(escenario_c, r = rango_vecm)
+
+```
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: pruebas LR con valores críticos por bootstrap
+lr_de_beta_parcial <- function(cj_sim, r) bh6lrtest(cj_sim, H = H_uip_out, r = r, r1 = 2,
+                                                    conv.val = 1e-4, max.iter = 200)@teststat
+
+set.seed(2017)
+lr_b_boot <- valores_criticos_lr(escenario_b, rango_vecm, lr_de_beta_parcial, n_rep_bootstrap)
+
+lr_b <- as.numeric(escenario_b@teststat)
+lr_c <- as.numeric(escenario_c@teststat)
+gl_b <- (length(vars_beta) - ncol(H_uip_out)) * 2  # Sólo dos vectores están restringidos
+gl_c <- (length(vars_beta) - ncol(H_cch)) * rango_vecm
+
+comparacion_escenarios <- tibble(
+  Escenario = c("A: beta sin restricciones", "B: sólo UIP y OUT", "C: las cuatro de CCH"),
+  Restricciones = c("Ninguna", "UIP y OUT", "PPP, UIP, MD y OUT"),
+  LR = c(NA_real_, lr_b, lr_c),
+  Grados_libertad = c(NA_real_, gl_b, gl_c),
+  Valor_p_asintotico = c(NA_real_, 1 - pchisq(lr_b, gl_b), 1 - pchisq(lr_c, gl_c)),
+  CV_bootstrap_5pct = c(NA_real_, quantile(lr_b_boot, 0.95, na.rm = TRUE), quantile(lr_beta_boot, 0.95, na.rm = TRUE)),
+  Valor_p_bootstrap = c(NA_real_, mean(lr_b_boot >= lr_b, na.rm = TRUE), mean(lr_beta_boot >= lr_c, na.rm = TRUE)),
+  Repeticiones_validas = c(NA_real_, sum(!is.na(lr_b_boot)), sum(!is.na(lr_beta_boot))),
+  Veredicto = c("No aplica (modelo de referencia)",
+                ifelse(mean(lr_b_boot >= lr_b, na.rm = TRUE) < 0.05, "Se rechazan", "No se rechazan"),
+                ifelse(mean(lr_beta_boot >= lr_c, na.rm = TRUE) < 0.05, "Se rechazan", "No se rechazan"))
+)
+
+print(comparacion_escenarios, width = Inf)
+
+# [Rev. 2026-09-19] Resultado central de esta sección:
+# - Escenario B (UIP y OUT): LR = 48.0 con valor crítico bootstrap de 92.8 al 5% y valor-p de 0.297, sobre 942 repeticiones
+#   válidas de 1,000: los datos NO rechazan estas dos restricciones.
+# - Escenario C (las cuatro de CCH): LR = 109.0 con valor crítico bootstrap de 48.4 y valor-p de 0: se rechazan.
+# - La diferencia entre ambos es lo que aportan PPP y la demanda de dinero, que son las dos relaciones problemáticas
+#   según las pruebas de elasticidad unitaria del Bloque 3 (p_usa = 1.43, e = 0.29, elasticidad ingreso de MD cercana a 3).
+# Nota: el valor-p asintótico de B (0.000003) rechazaría, pero el bootstrap muestra que el asintótico sobrerrechaza
+# de forma severa con esta dimensión y tamaño de muestra, igual que en CCH (2017, p. 14).
+
+```
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: vectores de cointegración de cada escenario
+cat("Escenario A: beta sin restricciones (normalización mecánica del paquete)\n")
+print(round(ajuste_a$beta, 3))
+
+cat("\nEscenario B: UIP y OUT impuestas; los otros dos vectores son libres\n")
+print(round(ajuste_b$beta, 3))
+
+cat("\nEscenario C: las cuatro relaciones de CCH\n")
+print(round(ajuste_c$beta, 3))
+
+# [Rev. 2026-09-19] Cómo leer estas matrices: cada columna (ect1 ... ect4) es un vector de cointegración y el paquete
+# normaliza poniendo un 1 en una variable distinta por columna.
+# - Escenario A: coeficientes grandes y sin patrón (por ejemplo, 68.0 en r_usa): sin restricciones los vectores sirven
+#   para el ajuste estadístico, pero no tienen lectura económica.
+# - Escenario B: el primer vector queda exactamente como y - y_usa + 0.25, es decir, la relación del producto con
+#   elasticidad unitaria (OUT). La UIP está impuesta dentro del mismo espacio; los otros dos vectores son libres.
+# - Escenario C: los cuatro vectores reproducen las relaciones de CCH, pero son las restricciones que el LR rechaza.
+
+```
+
+```{r}
+
+# [Rev. 2026-09-19] Nuevo chunk: velocidades de ajuste (alfa) y su significancia
+velocidades_ajuste <- function(ajuste, escenario) {
+  
+  resumen <- summary(ajuste$rlm)
+  
+  imap_dfr(resumen, function(ecuacion, nombre) {
+    filas <- grep("^ect", rownames(ecuacion$coefficients))
+    tibble(
+      Escenario = escenario,
+      Ecuacion = nombre,
+      Termino = rownames(ecuacion$coefficients)[filas],
+      Coeficiente = ecuacion$coefficients[filas, 1],
+      Valor_p = ecuacion$coefficients[filas, 4]
+    )
+  })
+}
+
+alfas <- bind_rows(
+  velocidades_ajuste(ajuste_a, "A"),
+  velocidades_ajuste(ajuste_b, "B"),
+  velocidades_ajuste(ajuste_c, "C")
+)
+
+# Resumen: en cuántas ecuaciones hay corrección de error significativa al 5%
+print(alfas %>% 
+        group_by(Escenario, Termino) %>% 
+        summarise(Ecuaciones_significativas = sum(Valor_p < 0.05), .groups = "drop") %>% 
+        pivot_wider(names_from = Termino, values_from = Ecuaciones_significativas),
+      width = Inf)
+
+# Detalle de la ecuación del tipo de cambio, que es la relevante para la hipótesis de Dornbusch
+print(alfas %>% filter(grepl("dif_e", Ecuacion)), width = Inf)
+
+# [Rev. 2026-09-19] Lectura de las velocidades de ajuste (alfa): indican qué variables corrigen los desequilibrios.
+# Ecuaciones con ajuste significativo al 5% por vector: A = 4, 3, 2, 1; B = 3, 2, 0, 3; C = 3, 6, 4, 3.
+# Lo relevante para Dornbusch está en la ecuación del tipo de cambio: en el escenario B la depreciación responde al
+# primer término de corrección de error con coeficiente -0.827 (valor-p = 0.025), es decir, hay corrección de error en
+# dif_e, que es el comportamiento que el mecanismo de sobre-reacción requiere.
+
+```
+
+Guía de decisión
+
+Para elegir conviene responder, en este orden:
+
+1. **¿Qué pregunta responde la tesis?** Si la pregunta es "¿se siguen cumpliendo los resultados de CCH?", el escenario C es una respuesta legítima y directa: se imponen sus restricciones, se rechazan, y ese rechazo es el hallazgo. Si la pregunta es "¿se sostiene la sobre-reacción de Dornbusch en México con datos recientes?", conviene un modelo que los datos no rechacen, es decir A o B.
+2. **¿Se necesita interpretación económica del largo plazo?** Si la tesis va a hablar de PPP, de demanda de dinero o de convergencia del producto, el escenario A no sirve: sus vectores no tienen lectura económica. B conserva dos relaciones interpretables.
+3. **¿Qué tanto pesa la comparabilidad con el paper?** C es idéntico en formato; B exige una sección que justifique por qué se relajan dos relaciones; A se aleja más.
+
+Recomendación del asesor (no vinculante): **el escenario B**, porque conserva la UIP, que es el mecanismo que la hipótesis de Dornbusch necesita, y porque es el único cuyas restricciones los datos no rechazan. Los escenarios A y C quedan como robustez en un apéndice.
+
+Sea cual sea la elección, Víctor, los pasos siguientes son los mismos: cuadro de ecuaciones de corrección de error con diagnósticos (Tabla 6 de CCH), estabilidad recursiva e impulso-respuesta del choque de política monetaria con el orden de Cholesky del Bloque 4.
+
+
+
+#Bloque 7: Tablas
+
+Configuración de las tablas 
+```{r}
+
+library(dplyr)
+library(tibble)
+library(gt)
+
+# ---- Carpeta del .Rmd y navegador para gtsave() ----
+if (!exists("carpeta_rmd")) {
+  carpeta_rmd <- tryCatch(
+    dirname(rstudioapi::getSourceEditorContext()$path),
+    error = function(e) getwd()
+  )
+}
+Sys.setenv(CHROMOTE_CHROME = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe")
+
+# ---- Formato académico (el mismo de las tablas 4.1 a 4.3) ----
+formato_academico <- function(tabla, tam = 18, tam_nota = 15) {
+  tabla %>%
+    tab_options(
+      table.font.names                   = c("Palatino Linotype", "Book Antiqua",
+                                             "Palatino", "Times New Roman", "serif"),
+      table.font.size                    = px(18),
+      table.background.color             = "white",
+      table.border.top.style             = "hidden",
+      table.border.bottom.style          = "hidden",
+      heading.align                      = "center",
+      heading.title.font.size            = px(22), 
+      heading.subtitle.font.size         = px(21),
+      heading.background.color           = "white",
+      heading.border.bottom.style        = "none",
+      column_labels.font.weight          = "normal",
+      column_labels.background.color     = "white",
+      column_labels.border.top.style     = "solid",
+      column_labels.border.top.width     = px(1.5),
+      column_labels.border.top.color     = "black",
+      column_labels.border.bottom.style  = "solid",
+      column_labels.border.bottom.width  = px(1),
+      column_labels.border.bottom.color  = "black",
+      table_body.hlines.style            = "none",
+      table_body.vlines.style            = "none",
+      table_body.border.bottom.style     = "solid",
+      table_body.border.bottom.width     = px(1.5),
+      table_body.border.bottom.color     = "black",
+      source_notes.font.size             = px(17),
+      source_notes.border.bottom.style   = "none",
+      source_notes.background.color      = "white",
+      data_row.padding                   = px(5)
+    )
+}
+
+```
+
+Tabla 3.1
+```{r}
+
+variables_modelo <- tribble(
+  ~Simbolo,                                   ~Variable,                                                              ~Fuente,
+  "<i>y</i><sub><i>t</i></sub>",              "LN del PIB real mexicano a.e. 2018=100",                "INEGI",
+  "<i>p</i><sub><i>t</i></sub>",              "LN del INPC, a.e. (2018=100)",                          "INEGI",
+  "<i>r91</i><sub><i>t</i></sub>",            "0.25ln(1+<i>R</i><sub><i>t</i></sub>/100), <i>R</i><sub><i>t</i></sub> = CETES a 91 días", "BANXICO",
+  "<i>m</i><sub><i>t</i></sub>",              "LN de M1 en términos reales, a.e. (M1/P)",              "BANXICO",
+  "<i>e</i><sub><i>t</i></sub>",              "LN del tipo de cambio peso-dólar",                      "BANXICO",
+  "<i>y_usa</i><sub><i>t</i></sub>",          "LN del PIB real de EE.UU. a.e. (2017=100)",             "FRED IMF",
+  "<i>p_usa</i><sub><i>t</i></sub>",          "LN del IPC de EE.UU. a.e. (2010=100)",                  "FRED",
+  "<i>r_usa</i><sub><i>t</i></sub>",          "0.25ln(1+<i>R</i><sub><i>t</i></sub>/100), <i>R</i><sub><i>t</i></sub> = bonos del tesoro a 3 meses", "FRED",
+  "<i>wti</i><sub><i>t</i></sub>",            "LN del precio del petróleo del West Texas Intermediate", "FRED",
+  "<i>pp_usa</i><sub><i>t</i></sub>",         "LN del IPP (para todos los commodities)",               "FRED",
+  "<i>cpf3m</i><sub><i>t</i></sub>",          "LN del tipo de interés del papel comercial financiero AA (90 días)", "FRED",
+  "<i>tedrate</i><sub><i>t</i></sub>",        "LN del diferencial TED",                                "FRED"
+)
+
+tabla_3.1 <- variables_modelo %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 3.1**"),
+    subtitle = md("Resumen de las variables del modelo")
+  ) %>%
+  fmt_markdown(columns = Simbolo) %>%
+  fmt_markdown(columns = Variable) %>%
+  cols_label(
+    Simbolo  = "",
+    Variable = "Variable",
+    Fuente   = "Fuente"
+  ) %>%
+  cols_align(align = "left",   columns = Simbolo) %>%
+  cols_align(align = "center", columns = c(Variable, Fuente)) %>%
+  cols_width(
+    Simbolo  ~ px(110),
+    Variable ~ px(560),
+    Fuente   ~ px(120)
+  ) %>%
+  tab_source_note(
+    source_note = "Fuente: selección de variables basada en Capistrán et al. (2017). a.e. = ajustado estacionalmente."
+  ) %>%
+ formato_academico()
+
+tabla_3.1
+
+
+
+```
+
+
+Tabla 4.1
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "none", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1]
+    cv_5pct  <- test@cval[1, "5pct"]
+    
+    tibble(
+      Estadistico_tau   = tau_stat,
+      CV_5pct           = cv_5pct,
+      Rezagos           = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+# ---- Tabla con formato académico ----
+tabla_4.1 <- resultados_adf %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 4.1**"),
+    subtitle = md("Prueba Dickey-Fuller aumentada sin constante ni tendencia")
+  ) %>%
+  cols_label(
+    Serie             = "Serie",
+    Estadistico_tau   = "Estadístico τ",
+    CV_5pct           = "Valor crítico (5%)",
+    Rezagos           = "Rezagos",
+    Estacionaria_5pct = "Estacionaria al 5%"
+  ) %>%
+  fmt_number(columns = c(Estadistico_tau, CV_5pct), decimals = 3) %>%
+  fmt_integer(columns = Rezagos) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Rezagos seleccionados con el criterio AIC."
+  ) %>%
+ formato_academico()
+
+tabla_4.1
+
+```
+
+Tabla 4.2
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "drift", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1, "tau2"]
+    cv_5pct  <- test@cval["tau2", "5pct"]
+    
+    tibble(
+      Estadistico_tau   = tau_stat,
+      CV_5pct           = cv_5pct,
+      Rezagos           = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+# ---- Tabla con formato académico ----
+tabla_4.2 <- resultados_adf %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 4.2**"),
+    subtitle = md("Prueba Dickey-Fuller aumentada con constante")
+  ) %>%
+  cols_label(
+    Serie             = "Serie",
+    Estadistico_tau   = "Estadístico τ",
+    CV_5pct           = "Valor crítico (5%)",
+    Rezagos           = "Rezagos",
+    Estacionaria_5pct = "Estacionaria al 5%"
+  ) %>%
+  fmt_number(columns = c(Estadistico_tau, CV_5pct), decimals = 3) %>%
+  fmt_integer(columns = Rezagos) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Rezagos seleccionados con el criterio AIC."
+  ) %>%
+  formato_academico()
+
+tabla_4.2
+
+```
+
+Tabla 4.3
+```{r}
+
+resultados_adf <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.df(serie, type = "trend", selectlags = "AIC")
+    
+    tau_stat <- test@teststat[1, "tau3"]
+    cv_5pct  <- test@cval["tau3", "5pct"]
+    
+    tibble(
+      Estadistico_tau   = tau_stat,
+      CV_5pct           = cv_5pct,
+      Rezagos           = test@lags,
+      Estacionaria_5pct = ifelse(tau_stat < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+# ---- Tabla con formato académico ----
+tabla_4.3 <- resultados_adf %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 4.3**"),
+    subtitle = md("Prueba Dickey-Fuller aumentada con constante y tendencia")
+  ) %>%
+  cols_label(
+    Serie             = "Serie",
+    Estadistico_tau   = "Estadístico τ",
+    CV_5pct           = "Valor crítico (5%)",
+    Rezagos           = "Rezagos",
+    Estacionaria_5pct = "Estacionaria al 5%"
+  ) %>%
+  fmt_number(columns = c(Estadistico_tau, CV_5pct), decimals = 3) %>%
+  fmt_integer(columns = Rezagos) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Rezagos seleccionados con el criterio AIC."
+  ) %>%
+ formato_academico()
+  
+tabla_4.3
+
+```
+
+Tabla 4.4
+
+```{r}
+
+
+resultados_ers <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.ers(serie, type = "DF-GLS", model = "constant", lag.max = 4)
+    
+    stat_gls <- as.numeric(test@teststat)
+    cv_5pct  <- as.numeric(test@cval[1, "5pct"])
+    
+    tibble(
+      Estadistico_GLS   = stat_gls,
+      CV_5pct           = cv_5pct,
+      Lags_Max          = test@lag,
+      Estacionaria_5pct = ifelse(stat_gls < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+# ---- Tabla con formato académico ----
+tabla_4.4 <- resultados_ers %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 4.4**"),
+    subtitle = md("Prueba Elliott-Rothenberg-Stock (DF-GLS) con constante")
+  ) %>%
+  cols_label(
+    Serie             = "Serie",
+    Estadistico_GLS   = "Estadístico DF-GLS",
+    CV_5pct           = "Valor crítico (5%)",
+    Lags_Max          = "Rezagos máx.",
+    Estacionaria_5pct = "Estacionaria al 5%"
+  ) %>%
+  fmt_number(columns = c(Estadistico_GLS, CV_5pct), decimals = 3) %>%
+  fmt_integer(columns = Lags_Max) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Prueba DF-GLS con rezago máximo = 4."
+  ) %>%
+ formato_academico()
+
+tabla_4.4
+```
+
+Tabla 4.5
+```{r}
+
+resultados_ers <- datos_adf %>%
+  dplyr::select(where(~ is.ts(.x) || inherits(.x, "ts") || is.numeric(.x))) %>%
+  map_dfr(function(x) {
+    
+    serie <- as.numeric(na.omit(x))
+    
+    test <- ur.ers(serie, type = "DF-GLS", model = "trend", lag.max = 4)
+    
+    stat_gls <- as.numeric(test@teststat)
+    cv_5pct  <- as.numeric(test@cval[1, "5pct"])
+    
+    tibble(
+      Estadistico_GLS   = stat_gls,
+      CV_5pct           = cv_5pct,
+      Lags_Max          = test@lag,
+      Estacionaria_5pct = ifelse(stat_gls < cv_5pct, "Sí", "No")
+    )
+  }, .id = "Serie")
+
+# ---- Tabla con formato académico ----
+tabla_4.5 <- resultados_ers %>%
+  gt() %>%
+  tab_header(
+    title    = md("**Tabla 4.5**"),
+    subtitle = md("Prueba Elliott-Rothenberg-Stock (DF-GLS) con constante y tendencia")
+  ) %>%
+  cols_label(
+    Serie             = "Serie",
+    Estadistico_GLS   = "Estadístico DF-GLS",
+    CV_5pct           = "Valor crítico (5%)",
+    Lags_Max          = "Rezagos máx.",
+    Estacionaria_5pct = "Estacionaria al 5%"
+  ) %>%
+  fmt_number(columns = c(Estadistico_GLS, CV_5pct), decimals = 3) %>%
+  fmt_integer(columns = Lags_Max) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Prueba DF-GLS con rezago máximo = 4."
+  ) %>%
+  formato_academico()
+  
+tabla_4.5
+
+```
+
+Tabla resumen 4.6
+```{r}
+
+
+tabla_4.6 <- resultados_tabla3 %>%
+  dplyr::select(-ADF_CCH, -DF_GLS_CCH) %>%
+  gt() %>%
+ tab_header(
+    title    = md("**Tabla 4.6**"),
+    subtitle = md("Resumen de distintas pruebas de raíces unitarias")
+  ) %>%
+  cols_label(
+    Serie                 = "Serie",
+    Datos                 = "Datos",
+    Modelo                = "Modelo",
+    Rezagos_MAIC          = "Rezagos (MAIC)",
+    ADF                   = "ADF",
+    CV_ADF_5pct           = "VC 5% ADF",
+    DF_GLS                = "DF-GLS",
+    CV_GLS_5pct           = "VC 5% DF-GLS",
+    Estacionaria_ADF_5pct = "Estac. ADF",
+    Estacionaria_GLS_5pct = "Estac. DF-GLS"
+  ) %>%
+  fmt_number(columns = c(ADF, CV_ADF_5pct, DF_GLS, CV_GLS_5pct), decimals = 3) %>%
+  fmt_integer(columns = Rezagos_MAIC) %>%
+  cols_align(align = "left",   columns = c(Serie, Datos, Modelo)) %>%
+  cols_align(align = "center", columns = -c(Serie, Datos, Modelo)) %>%
+  tab_source_note(
+    source_note = "Fuente: estimaciones propias. Rezagos seleccionados con el MAIC de Ng y Perron (2001). VC = valor crítico; Estac. = estacionaria al 5%."
+  ) %>%
+  formato_academico()
+
+tabla_4.6
+
+
+```
+
+
+Tabla 4.7. Pruebas de límites de Pesaran
+```{r}
+
+
+formato_p <- function(x) {
+  ifelse(
+    is.na(x),
+    NA_character_,
+    ifelse(x < 0.001, "<0.001", sprintf("%.3f", x))
+  )
+}
+
+resumen_limites <- function(modelo, relacion) {
+
+  f2 <- bounds_f_test(modelo, case = 2)
+  f3 <- bounds_f_test(modelo, case = 3)
+  test_t3 <- bounds_t_test(modelo, case = 3)
+
+  tibble(
+    Relacion = relacion,
+    F2 = as.numeric(f2$statistic)[1],
+    p_F2 = as.numeric(f2$p.value)[1],
+    F3 = as.numeric(f3$statistic)[1],
+    p_F3 = as.numeric(f3$p.value)[1],
+    t3 = as.numeric(test_t3$statistic)[1],
+    p_t3 = as.numeric(test_t3$p.value)[1]
+  )
+}
+
+
+limites <- bind_rows(
+  resumen_limites(mejor_ppp, "PPP"), resumen_limites(mejor_uip, "UIP"),
+  resumen_limites(mejor_md,  "MD"),  resumen_limites(mejor_out, "OUT")
+) %>%
+  mutate(Nivel_F2 = ifelse(p_F2 < 0.05, "Sí", "No"),
+         Nivel_F3 = ifelse(p_F3 < 0.05, "Sí", "No"),
+         Nivel_t3 = ifelse(p_t3 < 0.05, "Sí", "No")) %>%
+  dplyr::select(Relacion, F2, p_F2, Nivel_F2, F3, p_F3, Nivel_F3, t3, p_t3, Nivel_t3)
+
+tabla_4.7 <- limites %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.7**"), subtitle = md("Pruebas de límites para una relación de nivel")) %>%
+  tab_spanner(label = "F, caso 2 (constante restringida)", columns = c(F2, p_F2, Nivel_F2)) %>%
+  tab_spanner(label = "F, caso 3 (constante libre)",       columns = c(F3, p_F3, Nivel_F3)) %>%
+  tab_spanner(label = "t, caso 3",                         columns = c(t3, p_t3, Nivel_t3)) %>%
+  cols_label(Relacion = "Relación",
+             F2 = "Estadístico", p_F2 = "Valor-p", Nivel_F2 = "Rechaza H0",
+             F3 = "Estadístico", p_F3 = "Valor-p", Nivel_F3 = "Rechaza H0",
+             t3 = "Estadístico", p_t3 = "Valor-p", Nivel_t3 = "Rechaza H0") %>%
+  fmt_number(columns = c(F2, F3, t3), decimals = 2) %>%
+  fmt(columns = c(p_F2, p_F3, p_t3), fns = formato_p) %>%
+  cols_align(align = "left",   columns = Relacion) %>%
+  cols_align(align = "center", columns = -Relacion) %>%
+  tab_source_note("Fuente: estimaciones propias. H0: no existe relación de nivel. Con constante restringida (caso 2) sólo existe la prueba F.") %>%
+  formato_academico(tam = 16, tam_nota = 14)
+
+tabla_4.7
+
+```
+
+
+Tabla 4.8
+```{r}
+
+modelos_ardl <- list(PPP = modelo_ppp, UIP = modelo_uip, MD = modelo_md, OUT = modelo_out)
+
+sel_ardl <- tibble(
+  Relacion       = names(modelos_ardl),
+  Especificacion = c("<i>p</i> ~ <i>p_usa</i> + <i>e</i>",
+                     "Δ<i>e</i> ~ <i>r</i> + <i>r_usa</i>",
+                     "<i>m</i> ~ <i>y</i> + <i>r</i>",
+                     "<i>y</i> ~ <i>y_usa</i>"),
+  Dummies        = c("Ninguna",
+                     if (incluir_covid) paste(dummies_covid, collapse = ", ") else "Ninguna",
+                     "",
+                     "") ,
+  ARDL           = map_chr(modelos_ardl, ~ paste0("(", paste(.x$best_order, collapse = ","), ")")),
+  BIC            = map_dbl(modelos_ardl, ~ .x$top_orders$BIC[1])
+)
+# Las dummies de cada relación (PPP, UIP, MD, OUT) en el orden de modelos_ardl
+sel_ardl$Dummies <- c("Ninguna", "Ninguna",
+                      if (incluir_covid) paste(dummies_covid, collapse = ", ") else "Ninguna",
+                      paste(c(dummies_escalon, dummies_covid), collapse = ", "))
+
+tabla_4.8 <- sel_ardl %>%
+  gt() %>%
+   tab_header(
+    title    = md("**Tabla 4.8**"),
+    subtitle = md("Selección del número de rezagos de los ARDL (BIC)")
+  ) %>%
+  fmt_markdown(columns = Especificacion) %>%
+  cols_label(Relacion = "Relación", Especificacion = "Especificación",
+             Dummies = "Dummies fijas", ARDL = "Orden ARDL", BIC = "BIC") %>%
+  fmt_number(columns = BIC, decimals = 1) %>%
+  cols_align(align = "left",   columns = c(Relacion, Especificacion, Dummies)) %>%
+  cols_align(align = "center", columns = c(ARDL, BIC)) %>%
+  tab_source_note("Fuente: estimaciones propias. Orden máximo de 8 rezagos; las dummies entran como regresores fijos.") %>%
+  formato_academico()
+
+tabla_4.8
+
+
+```
+
+Tabla 4.9. Elasticidad 
+```{r}
+
+tabla_4.9 <- pruebas_elasticidad %>%
+  mutate(Valor_p = Valor_p) %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.9**"), subtitle = md("Pruebas de elasticidad unitaria")) %>%
+  cols_label(Relacion = "Relación", Termino = "Término", Estimacion = "Estimación",
+             Error_estandar = "Error estándar", Valor_H0 = "Valor bajo H0",
+             z = "z", Valor_p = "Valor-p", Se_rechaza_5pct = "Rechaza H0") %>%
+  fmt_number(columns = c(Estimacion, Error_estandar, z), decimals = 3) %>%
+  fmt_number(columns = Valor_H0, decimals = 0) %>%
+  fmt(columns = Valor_p, fns = formato_p) %>%
+  cols_align(align = "left",   columns = c(Relacion, Termino)) %>%
+  cols_align(align = "center", columns = -c(Relacion, Termino)) %>%
+  tab_source_note("Fuente: estimaciones propias. Estadístico z con el método delta.") %>%
+  formato_academico()
+
+tabla_4.9
+
+```
+
+Tabla 4.10. Estacionariedad de la brecha del producto
+```{r}
+
+tabla_4.10 <- diagnostico_brecha %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.10**"), subtitle = md("Pruebas de raíz unitaria de la brecha de producto <i>y</i> − <i>y_usa</i>")) %>%
+  cols_label(Serie = "Serie", Rezagos_MAIC = "Rezagos (MAIC)", ADF = "ADF",
+             CV_ADF_5pct = "VC 5% ADF", DF_GLS = "DF-GLS", CV_GLS_5pct = "VC 5% DF-GLS",
+             Estacionaria_ADF_5pct = "Estac. ADF", Estacionaria_GLS_5pct = "Estac. DF-GLS") %>%
+  fmt_number(columns = c(ADF, CV_ADF_5pct, DF_GLS, CV_GLS_5pct), decimals = 3) %>%
+  fmt_integer(columns = Rezagos_MAIC) %>%
+  cols_align(align = "left",   columns = Serie) %>%
+  cols_align(align = "center", columns = -Serie) %>%
+  tab_source_note("Fuente: estimaciones propias. Rezagos seleccionados con el MAIC de Ng y Perron (2001). VC = valor crítico; Estac. = estacionaria al 5%.") %>%
+  formato_academico(tam = 16, tam_nota = 14)
+
+tabla_4.10
+
+```
+
+
+Tabla 4.11. Relación OUT muestra completa vs. previa a la pandemia
+```{r}
+
+resumen_out <- function(modelo, muestra) {
+  lp <- multipliers(modelo)
+  i  <- which(lp$Term == "y_usa")
+  f2 <- bounds_f_test(modelo, case = 2)
+  t3 <- bounds_t_test(modelo, case = 3)
+  tibble(Muestra = muestra,
+         Elasticidad = lp$Estimate[i], EE = lp$`Std. Error`[i],
+         Valor_p_unidad = 2 * (1 - pnorm(abs((lp$Estimate[i] - 1)/lp$`Std. Error`[i]))),
+         F_caso2 = as.numeric(f2$statistic), p_F = as.numeric(f2$p.value)[1],
+         t_caso3 = as.numeric(t3$statistic), p_t = as.numeric(t3$p.value)[1])
+}
+
+out_comparacion <- bind_rows(
+  resumen_out(mejor_out, "Completa, con dummies"),
+  resumen_out(modelo_out_pre$best_model, "Previa a la pandemia")
+)
+
+tabla_4.11 <- out_comparacion %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.11**"), subtitle = md("Relación de largo plazo del producto (OUT): muestra completa y previa a la pandemia")) %>%
+  tab_spanner(label = "Elasticidad de y_usa", columns = c(Elasticidad, EE, Valor_p_unidad)) %>%
+  tab_spanner(label = "Pruebas de límites", columns = c(F_caso2, p_F, t_caso3, p_t)) %>%
+  cols_label(Muestra = "Muestra", Elasticidad = "Estimación", EE = "Error estándar",
+             Valor_p_unidad = "Valor-p (= 1)", F_caso2 = "F, caso 2", p_F = "Valor-p",
+             t_caso3 = "t, caso 3", p_t = "Valor-p") %>%
+  fmt_markdown(columns = everything()) %>%
+  fmt_number(columns = c(Elasticidad, EE, F_caso2, t_caso3), decimals = 3) %>%
+  fmt(columns = c(Valor_p_unidad, p_F, p_t), fns = formato_p) %>%
+  cols_align(align = "left",   columns = Muestra) %>%
+  cols_align(align = "center", columns = -Muestra) %>%
+  tab_source_note("Fuente: estimaciones propias. La muestra previa a la pandemia termina en 2019T4. H0 de las pruebas de límites: no existe relación de nivel.") %>%
+  formato_academico(tam = 16, tam_nota = 14)
+
+tabla_4.11
+
+```
+
+Tabla 4.12. Cambios estructurales de Bai y Perron (2003)
+```{r}
+
+tabla_bp_datos <- tibble(
+  Relacion   = c("OUT: <i>y</i> ~ <i>y_usa</i>", "MD: <i>m</i> ~ <i>y</i> + <i>r</i>"),
+  N_quiebres = c(length(quiebres_out), length(quiebres_md)),
+  Fechas     = c(if (length(quiebres_out) == 0) "Ninguno" else paste(quiebres_out, collapse = ", "),
+                 if (length(quiebres_md)  == 0) "Ninguno" else paste(quiebres_md,  collapse = ", ")),
+  Escalones  = c(if (length(quiebres_out) == 0) "—" else paste(nombre_escalon(quiebres_out), collapse = ", "),
+                 if (length(quiebres_md)  == 0) "—" else paste(nombre_escalon(quiebres_md),  collapse = ", "))
+)
+
+tabla_4.12 <- tabla_bp_datos %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.12**"), subtitle = md("Cambios de nivel en las relaciones estáticas (Bai y Perron, 2003)")) %>%
+  fmt_markdown(columns = Relacion) %>%
+  cols_label(Relacion = "Relación", N_quiebres = "Núm. de quiebres",
+             Fechas = "Primer periodo de cada régimen", Escalones = "Escalón asociado") %>%
+  cols_align(align = "left",   columns = c(Relacion, Fechas, Escalones)) %>%
+  cols_align(align = "center", columns = N_quiebres) %>%
+  tab_source_note("Fuente: estimaciones propias. Número de quiebres elegido con el BIC y tamaño mínimo de régimen h = 0.15; se excluyen 2020/02 y 2020/03.") %>%
+  formato_academico()
+
+tabla_4.12
+
+```
+
+Tablas 4.13 y 4.14 comparación de especificaciones OUT y MD
+
+```{r}
+
+# ---- Tabla 4.10: ajuste y pruebas de límites ----
+tabla_4.13 <- comparacion_ardl %>%
+  dplyr::select(Relacion:Valor_p_t) %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.13**"), subtitle = md("Especificaciones alternativas de OUT y MD: selección y pruebas de límites")) %>%
+  tab_spanner(label = "F restringida", columns = c(Caso_F_restringido, F_restringido, Valor_p_F_restringido)) %>%
+  tab_spanner(label = "F libre",       columns = c(F_libre, Valor_p_F_libre)) %>%
+  tab_spanner(label = "t libre",       columns = c(t_libre, Valor_p_t)) %>%
+  cols_label(Relacion = "Relación", Dummies = "Dummies fijas", Tendencia = "Tendencia",
+             ARDL = "ARDL", BIC = "BIC", Caso_F_restringido = "Caso",
+             F_restringido = "Estad.", Valor_p_F_restringido = "Valor-p",
+             F_libre = "Estad.", Valor_p_F_libre = "Valor-p",
+             t_libre = "Estad.", Valor_p_t = "Valor-p") %>%
+  fmt_number(columns = c(BIC), decimals = 1) %>%
+  fmt_number(columns = c(F_restringido, F_libre, t_libre), decimals = 2) %>%
+  fmt_integer(columns = Caso_F_restringido) %>%
+  fmt(columns = c(Valor_p_F_restringido, Valor_p_F_libre, Valor_p_t), fns = formato_p) %>%
+  cols_align(align = "left",   columns = c(Relacion, Dummies)) %>%
+  cols_align(align = "center", columns = -c(Relacion, Dummies)) %>%
+  tab_source_note("Fuente: estimaciones propias. Rezagos por BIC. Sin tendencia, la F restringida es el caso 2 y la libre el caso 3; con tendencia, los casos 4 y 5. La prueba t corresponde al caso de la F libre.") %>%
+  formato_academico(tam = 13, tam_nota = 12)
+
+tabla_4.13
+
+# ---- Tabla 4.14: largo plazo, elasticidad unitaria y dummies ----
+tabla_4.14 <- comparacion_ardl %>%
+  dplyr::select(Relacion, Dummies, Tendencia, Largo_plazo, Valor_p_elasticidad, Valor_p_dummies) %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.14**"), subtitle = md("Especificaciones alternativas de OUT y MD: coeficientes de largo plazo y significancia de las dummies")) %>%
+  cols_label(Relacion = "Relación", Dummies = "Dummies fijas", Tendencia = "Tendencia",
+             Largo_plazo = "Coeficientes de largo plazo",
+             Valor_p_elasticidad = "Valor-p (elasticidad = 1)",
+             Valor_p_dummies = "Valor-p de las dummies") %>%
+  fmt(columns = Valor_p_elasticidad, fns = formato_p) %>%
+  sub_missing(columns = Valor_p_elasticidad, missing_text = "—") %>%
+  cols_align(align = "left",   columns = c(Relacion, Dummies, Largo_plazo, Valor_p_dummies)) %>%
+  cols_align(align = "center", columns = c(Tendencia, Valor_p_elasticidad)) %>%
+  tab_source_note("Fuente: estimaciones propias. La elasticidad unitaria se contrasta con y_usa = 1 en OUT y con y = 1 en MD (método delta).") %>%
+  formato_academico(tam = 13, tam_nota = 12)
+
+tabla_4.14
+
+```
+
+Tabla 4.15
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(gt)
+
+criterios <- as_tibble(seleccion_rezagos$criteria, rownames = "Criterio") %>%
+  rename_with(~ paste0("p", .x), -Criterio) %>%
+  mutate(Criterio = recode(Criterio, "AIC(n)" = "AIC", "HQ(n)" = "HQ",
+                           "SC(n)" = "SC (BIC)", "FPE(n)" = "FPE"))
+
+criterios$Optimo <- apply(as.matrix(criterios[, paste0("p", 1:4)]), 1, which.min)
+
+tabla_4.15 <- criterios %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.15**"), subtitle = md("Selección del número de rezagos del VAR subyacente")) %>%
+  cols_label(Criterio = "Criterio", p1 = "p = 1", p2 = "p = 2", p3 = "p = 3",
+             p4 = "p = 4", Optimo = "Rezago óptimo") %>%
+  fmt_number(columns = starts_with("p"), rows = Criterio != "FPE", decimals = 3) %>%
+  fmt_scientific(columns = starts_with("p"), rows = Criterio == "FPE", decimals = 2) %>%
+  fmt_integer(columns = Optimo) %>%
+  cols_align(align = "left",   columns = Criterio) %>%
+  cols_align(align = "center", columns = -Criterio) %>%
+  tab_source_note("Fuente: estimaciones propias. VAR con constante y exógenas en diferencias rezagadas y dummies; se evalúan de 1 a 4 rezagos. En negritas, el rezago que minimiza cada criterio.") %>%
+  formato_academico()
+
+for (i in seq_len(nrow(criterios))) {
+  tabla_4.15 <- tabla_4.15 %>%
+    tab_style(style = cell_text(weight = "bold"),
+              locations = cells_body(columns = paste0("p", criterios$Optimo[i]), rows = i))
+}
+
+tabla_4.15
+
+```
+
+
+Tabla 4.16
+```{r}
+
+traza_tabla <- function(obj) {
+  n <- length(obj@teststat)
+  tibble(Hipotesis = c("r = 0", paste0("r ≤ ", 1:(n - 1))),
+         Traza = rev(as.numeric(obj@teststat)),
+         CV_5  = rev(as.numeric(obj@cval[, "5pct"])))
+}
+
+tz_const <- traza_tabla(prueba_traza_const) %>% rename(Traza_c = Traza, CV_c = CV_5)
+tz_trend <- traza_tabla(prueba_traza_trend) %>% rename(Traza_t = Traza, CV_t = CV_5)
+
+traza_completa <- inner_join(tz_const, tz_trend, by = "Hipotesis") %>%
+  mutate(Rech_c = ifelse(Traza_c > CV_c, "Sí", "No"),
+         Rech_t = ifelse(Traza_t > CV_t, "Sí", "No")) %>%
+  dplyr::select(Hipotesis, Traza_c, CV_c, Rech_c, Traza_t, CV_t, Rech_t)
+
+tabla_4.16 <- traza_completa %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.16**"), subtitle = md("Prueba de la traza de Johansen: sistema completo")) %>%
+  tab_spanner(label = "Con constante (especificación de CCH)", columns = c(Traza_c, CV_c, Rech_c)) %>%
+  tab_spanner(label = "Con tendencia (referencia)",            columns = c(Traza_t, CV_t, Rech_t)) %>%
+  cols_label(Hipotesis = "H0", Traza_c = "Traza", CV_c = "VC 5%", Rech_c = "Rechaza H0",
+             Traza_t = "Traza", CV_t = "VC 5%", Rech_t = "Rechaza H0") %>%
+  fmt_number(columns = c(Traza_c, CV_c, Traza_t, CV_t), decimals = 2) %>%
+  cols_align(align = "left",   columns = Hipotesis) %>%
+  cols_align(align = "center", columns = -Hipotesis) %>%
+  tab_source_note("Fuente: estimaciones propias. Johansen (1995) con K = 2 y dumvar. VC = valor crítico asintótico, que no es válido con dummies ni exógenas débiles.") %>%
+  formato_academico(tam = 16, tam_nota = 14)
+
+tabla_4.16
+
+```
+
+
+Tabla 4.17
+```{r}
+
+gl_exo <- length(pos_exogenas_debiles) * 4   # 2 variables x r = 4 vectores
+lr_exo <- as.numeric(prueba_exogeneidad@teststat)
+
+exogeneidad <- tibble(
+  H0 = "α de <i>y_usa</i> y <i>r_usa</i> igual a cero, con <i>r</i> = 4",
+  LR = lr_exo,
+  gl = gl_exo,
+  p  = 1 - pchisq(lr_exo, gl_exo),
+  Rechaza = ifelse(1 - pchisq(lr_exo, gl_exo) < 0.05, "Sí", "No")
+)
+
+tabla_4.17 <- exogeneidad %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.17**"), subtitle = md("Prueba de exogeneidad débil de <i>y_usa</i> y <i>r_usa</i> (valor crítico asintótico)")) %>%
+  fmt_markdown(columns = H0) %>%
+  cols_label(H0 = "Hipótesis nula", LR = "LR", gl = "g.l.", p = "Valor-p", Rechaza = "Rechaza al H0") %>%
+  fmt_number(columns = LR, decimals = 2) %>%
+  fmt_integer(columns = gl) %>%
+  fmt(columns = p, fns = formato_p) %>%
+  cols_align(align = "left",   columns = H0) %>%
+  cols_align(align = "center", columns = -H0) %>%
+  tab_source_note("Fuente: estimaciones propias. Prueba LR de Johansen (1995) sobre las cargas α.") %>%
+  formato_academico()
+
+tabla_4.17
+
+```
+
+
+Tabla 4.18
+```{r}
+
+traza_parcial_tabla <- tabla5 %>%
+  mutate(Hipotesis = c("r = 0", paste0("r ≤ ", 1:(n() - 1))),
+         Rechaza   = ifelse(Valor_p < 0.05, "Sí", "No")) %>%
+  dplyr::select(Hipotesis, Autovalor, Traza, CV_95, Valor_p, Rechaza)
+
+tabla_4.18 <- traza_parcial_tabla %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.18**"), subtitle = md("Prueba de la traza del sistema parcial con valores críticos simulados")) %>%
+  cols_label(Hipotesis = "H0", Autovalor = "Autovalor", Traza = "Traza",
+             CV_95 = "VC 5% (simulado)", Valor_p = "Valor-p (simulado)", Rechaza = "Rechaza H0") %>%
+  fmt_number(columns = c(Autovalor), decimals = 3) %>%
+  fmt_number(columns = c(Traza, CV_95), decimals = 2) %>%
+  fmt(columns = Valor_p, fns = formato_p) %>%
+  cols_align(align = "left",   columns = Hipotesis) %>%
+  cols_align(align = "center", columns = -Hipotesis) %>%
+  tab_source_note("Fuente: estimaciones propias. Sistema parcial (Harbo et al., 1998) con endógenas y, p, Δe, r, m y ti, y débilmente exógenas y_usa y r_usa. Valores críticos simulados con 5,000 repeticiones de caminatas aleatorias independientes.") %>%
+  formato_academico()
+
+tabla_4.18
+
+```
+
+
+Tabla 4.19
+```{r}
+
+sens_ancha <- sensibilidad_rango %>%
+  dplyr::select(Configuracion, Rango, Valor_p, Rango_5pct, VAR_AIC, VAR_HQ, VAR_FPE) %>%
+  pivot_wider(names_from = Rango, values_from = Valor_p, names_prefix = "r") %>%
+  relocate(Rango_5pct, VAR_AIC, VAR_HQ, VAR_FPE, .after = last_col())
+
+tabla_4.19 <- sens_ancha %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.19**"), subtitle = md("Sensibilidad del rango de cointegración y de los rezagos del VAR al juego de dummies")) %>%
+  tab_spanner(label = "Valor-p de la traza (simulado)", columns = starts_with("r") & !any_of("Rango_5pct")) %>%
+  tab_spanner(label = "Rezagos del VAR", columns = c(VAR_AIC, VAR_HQ, VAR_FPE)) %>%
+  cols_label(Configuracion = "Configuración de dummies",
+             r0 = "r = 0", r1 = "r ≤ 1", r2 = "r ≤ 2", r3 = "r ≤ 3", r4 = "r ≤ 4", r5 = "r ≤ 5",
+             Rango_5pct = "Rango (5%)", VAR_AIC = "AIC", VAR_HQ = "HQ", VAR_FPE = "FPE") %>%
+  fmt(columns = starts_with("r") & !any_of("Rango_5pct"), fns = formato_p) %>%
+  fmt_integer(columns = c(Rango_5pct, VAR_AIC, VAR_HQ, VAR_FPE)) %>%
+  cols_align(align = "left",   columns = Configuracion) %>%
+  cols_align(align = "center", columns = -Configuracion) %>%
+  tab_source_note("Fuente: estimaciones propias. Traza del sistema parcial con 2,000 repeticiones por configuración. Los escalones entran restringidos al espacio de cointegración y los impulsos sin restricción. Rango (5%) = número de hipótesis rechazadas con valor-p < 0.05.") %>%
+  formato_academico(tam = 14, tam_nota = 13)
+
+tabla_4.19
+
+```
+
+
+Tabla 4.20
+```{r}
+
+library(dplyr)
+library(tibble)
+library(gt)
+
+restricciones_lp <- tribble(
+  ~Relacion,                                      ~Restriccion,
+  "PPP: paridad del poder adquisitivo",           "<i>p</i> = <i>p_usa</i> + <i>e</i>",
+  "UIP: paridad descubierta de tasas de interés", "Δ<i>e</i> = <i>r</i> − <i>r_usa</i>",
+  "MD: demanda de dinero",                        "<i>m</i> = <i>y</i> + <i>b<sub>r</sub></i>·<i>r</i>, con <i>b<sub>r</sub></i> libre",
+  "OUT: producto relativo",                       "<i>y</i> = <i>y_usa</i>",
+  "Exogeneidad débil",                            "α de <i>y_usa</i> y <i>r_usa</i> igual a cero (no corrigen desequilibrios de largo plazo)"
+)
+
+tabla_4.20 <- restricciones_lp %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.20**"), subtitle = md("Restricciones de largo plazo y de exogeneidad débil")) %>%
+  fmt_markdown(columns = Restriccion) %>%
+  cols_label(Relacion = "Relación", Restriccion = "Restricción") %>%
+  cols_align(align = "left", columns = c(Relacion, Restriccion)) %>%
+  cols_width(Relacion ~ px(300), Restriccion ~ px(420)) %>%
+  tab_source_note("Fuente: restricciones de sobreidentificación. Rango de cointegración r = 4. Las dicotómicas entran en dumvar y no en el espacio de cointegración.") %>%
+  formato_academico()
+
+tabla_4.20
+
+```
+
+Tabla 21
+```{r}
+
+tabla_lr_datos <- resultados_lr %>%
+  mutate(
+    Prueba = c("Restricciones de largo plazo (β)",
+               "Exogeneidad débil de <i>y_usa</i> y <i>r_usa</i> (α)"),
+    Rechaza_asint = ifelse(Valor_p_asintotico < 0.05, "Sí", "No"),
+    Rechaza_boot  = ifelse(LR > CV_bootstrap_5pct,    "Sí", "No")
+  ) %>%
+  dplyr::select(Prueba, LR, Grados_libertad, Valor_p_asintotico, Rechaza_asint,
+                CV_bootstrap_5pct, CV_bootstrap_10pct, Valor_p_bootstrap,
+                Rechaza_boot, Repeticiones_validas)
+
+tabla_4.21 <- tabla_lr_datos %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.21**"), subtitle = md("Pruebas de razón de verosimilitud: valores críticos asintóticos y bootstrap")) %>%
+  fmt_markdown(columns = Prueba) %>%
+  tab_spanner(label = "Asintótico",
+              columns = c(Grados_libertad, Valor_p_asintotico, Rechaza_asint)) %>%
+  tab_spanner(label = "Bootstrap paramétrico",
+              columns = c(CV_bootstrap_5pct, CV_bootstrap_10pct, Valor_p_bootstrap,
+                          Rechaza_boot, Repeticiones_validas)) %>%
+  cols_label(Prueba = "Hipótesis nula", LR = "LR", Grados_libertad = "g.l.",
+             Valor_p_asintotico = "Valor-p", Rechaza_asint = "Rechaza H0",
+             CV_bootstrap_5pct = "VC 5%", CV_bootstrap_10pct = "VC 10%",
+             Valor_p_bootstrap = "Valor-p", Rechaza_boot = "Rechaza H0?",
+             Repeticiones_validas = "Rep. válidas") %>%
+  fmt_number(columns = c(LR, CV_bootstrap_5pct, CV_bootstrap_10pct), decimals = 2) %>%
+  fmt_integer(columns = c(Grados_libertad, Repeticiones_validas)) %>%
+  fmt(columns = c(Valor_p_asintotico, Valor_p_bootstrap), fns = formato_p) %>%
+  cols_align(align = "left",   columns = Prueba) %>%
+  cols_align(align = "center", columns = -Prueba) %>%
+  tab_source_note("Fuente: estimaciones propias. Bootstrap paramétrico con 1,000 repeticiones, como en Capistrán et al. (2017, p. 14); las repeticiones en que el algoritmo no converge se descartan. VC = valor crítico; g.l. = grados de libertad.") %>%
+  formato_academico(tam = 16, tam_nota = 14)
+
+tabla_4.21
+
+```
+
+Tabla 4.22
+```{r}
+
+vect_norm <- sapply(seq_len(rango_vecm), function(j) {
+  vectores_estimados[, j] / vectores_estimados[normalizacion[j], j]
+})
+rownames(vect_norm) <- rownames(vectores_estimados)
+colnames(vect_norm) <- paste0("beta", seq_len(rango_vecm))
+
+tabla_vect_datos <- as_tibble(vect_norm, rownames = "Variable") %>%
+  mutate(Variable = gsub("\\.l[0-9]+$", "", Variable),
+         Variable = ifelse(Variable == "constant", "Constante", Variable))
+
+nombres_norm <- c("p", "Δe", "m", "y")   # variable de normalización de cada vector
+
+tabla_4.22 <- tabla_vect_datos %>%
+  gt() %>%
+  tab_header(title = md("**Tabla 4.22**"), subtitle = md("Vectores de cointegración estimados sin restricciones")) %>%
+  cols_label(Variable = "Variable",
+             beta1 = paste0("Vector 1 (norm. ", nombres_norm[1], ")"),
+             beta2 = paste0("Vector 2 (norm. ", nombres_norm[2], ")"),
+             beta3 = paste0("Vector 3 (norm. ", nombres_norm[3], ")"),
+             beta4 = paste0("Vector 4 (norm. ", nombres_norm[4], ")")) %>%
+  fmt_number(columns = starts_with("beta"), decimals = 3) %>%
+  cols_align(align = "left",   columns = Variable) %>%
+  cols_align(align = "center", columns = -Variable) %>%
+  tab_source_note("Fuente: estimaciones propias. Estimador de Johansen con rango r = 4; cada vector se normaliza en p, Δe, m y y, respectivamente.") %>%
+  formato_academico()
+
+tabla_4.22
+
+```
+
+
+
+#Bloque 8: Gráficos
+
+Gráfica 3.1: Tipo de cambio vs ratio de precios
+```{r}
+
+# Factor de reescalamiento: ajusta los rangos de ambas series
+dif <- Ldatos$p - Ldatos$p_usa
+
+
+a <- diff(range(Ldatos$e, na.rm = TRUE)) / diff(range(dif, na.rm = TRUE))  # escala
+b <- min(Ldatos$e, na.rm = TRUE) - a * min(dif, na.rm = TRUE)              # desplazamiento
+
+
+figura_3.1 <- ggplot(Ldatos, aes(x = año, group = 1)) +
+  geom_line(aes(y = e, color = "Tipo de cambio nominal (eje izquierdo)"),
+            linewidth = 0.8) +
+  geom_line(aes(y = (p - p_usa) * a + b, color = "Ratio de precios (eje derecho)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name =  "Logaritmos",
+    sec.axis = sec_axis(~ (. - b) / a, name =  "Logaritmos")
+  ) +
+  
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  
+  labs(
+    title = "Figura 3.1",
+    subtitle = "Tipo de cambio y ratio de precios",
+    caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal.",
+    x = NULL,
+    color = NULL
+  ) +
+  scale_color_manual(values = c("Tipo de cambio nominal (eje izquierdo)" = "blue",
+                                "Ratio de precios (eje derecho)" = "red")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    
+    # Leyenda dentro del gráfico (esquina superior izquierda)
+    legend.position = "bottom",
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.justification = c(0.5, 1),
+    legend.background = element_rect(fill = "white", color = "white"),
+
+    # Título y subtítulo centrados
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption = element_markdown(size = 9, hjust = 0),
+
+    # Fondo blanco
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+
+    # Ejes negros visibles
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+
+    # Sin cuadrícula (quítalo si quieres conservarla)
+    panel.grid = element_blank()
+  )
+  
+
+figura_3.1
+
+ggsave(
+  filename = "figura_3.1.png", 
+  plot = figura_3.1, 
+  width = 6,       # Ancho en pulgadas
+  height = 4.5,      # Alto en pulgadas
+  dpi = 300        # Resolución de alta calidad
+)
+
+```
+
+Gráfica 3.2: Tipo de cambio real y nominal
+```{r}
+
+
+# Factor de reescalamiento: ajusta los rangos de ambas series
+reer <- Ldatos$e + Ldatos$p_usa - Ldatos$p
+
+a <- diff(range(Ldatos$e, na.rm = TRUE)) / diff(range(reer, na.rm = TRUE))  # escala
+b <- min(Ldatos$e, na.rm = TRUE) - a * min(reer, na.rm = TRUE)              # desplazamiento
+
+figura_3.2 <- ggplot(Ldatos, aes(x = año, group = 1)) +
+  geom_line(aes(y = e, color = "Tipo de cambio nominal (eje izquierdo)"),
+            linewidth = 0.8) +
+  geom_line(aes(y = (e + p_usa - p) * a + b, color = "Tipo de cambio real (eje derecho)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name =  "Logaritmos",
+    sec.axis = sec_axis(~ (. - b) / a, name =  "Logaritmos")
+  ) +
+  
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  
+  labs(
+    title = "Figura 3.2",
+    subtitle = "Tipo de cambio real y nominal",
+    caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal.",
+    x = NULL,
+    color = NULL
+  ) +
+  scale_color_manual(values = c("Tipo de cambio nominal (eje izquierdo)" = "blue",
+                                "Tipo de cambio real (eje derecho)" = "orange")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    
+    # Leyenda dentro del gráfico (esquina superior izquierda)
+    legend.position = "bottom",
+    legend.justification = c(0.5, 1),
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.background = element_rect(fill = "white", color = "white"),
+
+    # Título y subtítulo centrados
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption = element_markdown(size = 9, hjust = 0),
+
+    # Fondo blanco
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+
+    # Ejes negros visibles
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+
+    # Sin cuadrícula (quítalo si quieres conservarla)
+    panel.grid = element_blank()
+  )
+
+figura_3.2
+
+ggsave(
+  filename = "figura_3.2.png", 
+  plot = figura_3.2, 
+  width = 6,       # Ancho en pulgadas
+  height = 4.5,      # Alto en pulgadas
+  dpi = 300        # Resolución de alta calidad
+)
+
+```
+
+Gráfica X: Tasa de depreciación y diferencial de inflación
+```{r}
+
+
+# Serie que se grafica en el eje derecho
+DLdatos$dif_inf <- DLdatos$p - DLdatos$p_usa
+
+# ---- Rangos deseados (ajústalos a tu gusto) ----
+prim_min <- -0.15; prim_max <- 0.3   # eje primario (izquierdo)
+sec_min  <- -0.015; sec_max  <- 0.045   # eje secundario (derecho)
+
+# Transformación lineal: sec -> primario
+a <- (prim_max - prim_min) / (sec_max - sec_min)
+b <- prim_min - a * sec_min
+
+ggplot(DLdatos, aes(x = año, group = 1)) +
+  geom_line(aes(y = e, color = "Tasa de depreciación (eje izq.)"),
+            linewidth = 0.8) +
+  geom_line(aes(y = dif_inf * a + b, color = "Diferencial de inflación (eje der.)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Logaritmos",
+    sec.axis = sec_axis(~ (. - b) / a, name = "Logaritmos")
+  ) +
+  coord_cartesian(ylim = c(prim_min, prim_max)) +   # acota el eje primario
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  labs(title = "Gráfica 3",
+       subtitle = "Diferencial de inflación y tasa de depreciación",
+       x = "Fecha", color = "Series") +
+  scale_color_manual(values = c("Tasa de depreciación (eje izq.)" = "purple",
+                                "Diferencial de inflación (eje der.)" = "darkblue")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.36, 0.98),
+    legend.justification = c(0, 1),
+    legend.background = element_rect(fill = "white", color = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+
+```
+
+Gráfica 3.3
+```{r}
+
+h <- 4   # horizonte en trimestres (prueba 4, 8, 12, 20...)
+
+
+# Variables acumuladas en ventanas móviles de h trimestres
+DLdatos <- DLdatos %>%
+  mutate(
+    dif_p = p - p_usa,
+    X = rollsum(dif_p, k = h, fill = NA, align = "right"),  # inflación diferencial acumulada
+    Y = rollsum(e,     k = h, fill = NA, align = "right")   # depreciación nominal acumulada
+  )
+
+datos_sc <- DLdatos %>% filter(!is.na(X), !is.na(Y))
+
+
+# Pendiente OLS
+mod <- lm(Y ~ X, data = datos_sc)
+
+figura_3.3 <- ggplot(datos_sc, aes(x = X, y = Y)) +
+  geom_point(color = "darkblue", alpha = 0.6, size = 1.8) +
+  geom_abline(aes(slope = 1, intercept = 0, linetype = "Línea de 45° (PPP relativa)"),
+              color = "black", linewidth = 0.8) +
+  geom_smooth(aes(linetype = "Ajuste OLS"), method = "lm", se = FALSE,
+              color = "purple", linewidth = 0.9) +
+  scale_linetype_manual(values = c("Línea de 45° (PPP relativa)" = "dashed",
+                                   "Ajuste OLS" = "solid")) +
+  labs(
+    title = "Figura 3.3",
+    subtitle = paste0("Depreciación nominal y diferencial de inflación acumulados (h = ", h, " trimestres)"),
+    caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal.",
+    x = "Diferencial de inflación acumulado",
+    y = "Depreciación nominal acumulada",
+    linetype = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.caption = element_markdown(size = 9, hjust = 0),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+figura_3.3
+
+ggsave(
+  filename = "figura_3.3.png", 
+  plot = figura_3.3, 
+  width = 6,       # Ancho en pulgadas
+  height = 5.2,      # Alto en pulgadas
+  dpi = 300        # Resolución de alta calidad
+)
+
+# ¿La pendiente es significativamente distinta de 1?
+# Con ventanas traslapadas hay autocorrelación, así que usa errores HAC (Newey-West)
+vc <- NeweyWest(mod, lag = h - 1, prewhite = FALSE)
+coeftest(mod, vcov. = vc)
+linearHypothesis_ok <- (coef(mod)["X"] - 1) / sqrt(vc["X", "X"])   # estadístico t para H0: pendiente = 1
+linearHypothesis_ok
+
+```
+
+Figura 3.4
+```{r}
+
+figura_3.4 <- ggplot(datos, aes(x = año, group = 1)) +
+  geom_line(aes(y = r, color = "Cetes a 91 días"),
+            linewidth = 0.8) +
+  geom_line(aes(y = r_usa, color = "Bonos del tesoro a 3 meses"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name =  "Puntos porcentuales"
+  ) +
+  
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  
+  labs(
+    title = "Figura 3.4",
+    subtitle = "Tasa de interés de México y Estados Unidos",
+    caption = "**Fuente:** Elaboración propia con datos de Banco de México y Reserva Federal.",
+    x = NULL,
+    color = NULL
+  ) +
+  scale_color_manual(values = c("Cetes a 91 días" = "darkred",
+                                "Bonos del tesoro a 3 meses" = "darkorange")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    # Leyenda dentro del gráfico (esquina superior izquierda)
+    legend.position = "bottom",
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.justification = c(0.5, 1),
+    legend.background = element_rect(fill = "white", color = "white"),
+
+    # Título y subtítulo centrados
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption = element_markdown(size = 9, hjust = 0),
+
+    # Fondo blanco
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+
+    # Ejes negros visibles
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+
+    # Sin cuadrícula (quítalo si quieres conservarla)
+    panel.grid = element_blank()
+  )
+ 
+figura_3.4
+
+ggsave(
+  filename = "figura_3.4.png", 
+  plot = figura_3.4, 
+  width = 6,       # Ancho en pulgadas
+  height = 4.5,      # Alto en pulgadas
+  dpi = 300        # Resolución de alta calidad
+)
+
+```
+
+Gráfica 3.5: Tipo de cambio real y nominal
+```{r}
+
+Ldatos <- Ldatos %>%
+  arrange(año) %>%
+  mutate(
+    dif_r = r - r_usa,          # diferencial de tasas
+    dep   = c(NA, diff(e))      # tasa de depreciación (diferencia de logs)
+  )
+
+# Escala y desplazamiento para el eje derecho (basados en la serie del eje izquierdo)
+a <- diff(range(Ldatos$dep, na.rm = TRUE)) / diff(range(Ldatos$dif_r, na.rm = TRUE))
+b <- min(Ldatos$dep, na.rm = TRUE) - a * min(Ldatos$dif_r, na.rm = TRUE)
+
+figura_3.5 <- ggplot(Ldatos, aes(x = año)) +
+  geom_line(aes(y = dep,
+                color = "Tasa de depreciación (eje izquierdo)",
+                linetype = "Tasa de depreciación (eje izquierdo)"),
+            linewidth = 0.8, na.rm = TRUE) +
+  geom_line(aes(y = dif_r * a + b,
+                color = "Diferencial de tasas (eje derecho)",
+                linetype = "Diferencial de tasas (eje derecho)"),
+            linewidth = 0.8, na.rm = TRUE) +
+  scale_y_continuous(
+  name = "Logaritmos",
+  sec.axis = sec_axis(~ (. - b) / a,
+                      name = "Diferencial de tasas",
+                      breaks = scales::pretty_breaks(n = ))
+) +
+  scale_x_date(date_breaks = "5 years", date_labels = "%Y") +
+  scale_color_manual(values = c("Tasa de depreciación (eje izquierdo)" = "purple",
+                                "Diferencial de tasas (eje derecho)"   = "darkblue")) +
+  scale_linetype_manual(values = c("Tasa de depreciación (eje izquierdo)" = "dotted",
+                                   "Diferencial de tasas (eje derecho)"   = "solid")) +
+  labs(
+    title    = "Figura 3.5",
+    subtitle = "Depreciación del tipo de cambio y diferencial de tasas de interés",
+    caption  = "**Fuente:** Elaboración propia con datos de Banco de México y Reserva Federal.",
+    x = NULL, color = NULL, linetype = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+
+    # Leyenda debajo del gráfico
+    legend.position = "bottom",
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.background = element_rect(fill = "white", color = "white"),
+
+    # Título y subtítulo centrados
+    plot.title    = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+
+    # Fondo blanco
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+
+    # Ejes negros visibles
+    axis.line  = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text  = element_text(color = "black"),
+
+    # Sin cuadrícula
+    panel.grid = element_blank()
+  )
+
+figura_3.5
+
+ggsave(
+  filename = "figura_3.5.png",
+  plot = figura_3.5,
+  width = 6.5, height = 5, dpi = 300,
+  bg = "white"
+)
+
+```
+
+
+Figura X
+```{r}
+
+
+# Asegúrate de que los datos estén ordenados por tiempo
+Ldatos <- Ldatos %>%
+  arrange(Periodo) %>%
+  mutate(
+    # Depreciación acumulada de 4 trimestres (anual)
+    dep_anual = e - dplyr::lag(e, 1),
+    # Diferencial anual: promedio móvil de 4 trimestres (tasas anualizadas)
+    dif_anual = rollmean(dif_r, k = 1, fill = NA, align = "right")
+    # Si dif_r es tasa trimestral, usa mejor:
+    # dif_anual = rollsum(dif_r, k = 4, fill = NA, align = "right")
+  )
+
+ggplot(Ldatos, aes(x = dif_anual, y = dep_anual)) +
+  geom_point(color = "darkblue", alpha = 0.6, size = 1.8) +
+  geom_abline(aes(slope = 1, intercept = 0, linetype = "Línea de 45° (PPP relativa)"),
+              color = "black", linewidth = 0.8) +
+  geom_smooth(aes(linetype = "Ajuste OLS"), method = "lm", se = FALSE,
+              color = "purple", linewidth = 0.9, na.rm = TRUE) +
+  scale_linetype_manual(values = c("Línea de 45° (PPP relativa)" = "dashed",
+                                   "Ajuste OLS" = "solid")) +
+  labs(
+    title = "Gráfica 6",
+    subtitle = "Diferencial anual de tasas y depreciación anual acumulada",
+    x = "Diferencial anual de tasas de interés",
+    y = "Depreciación nominal anual acumulada",
+    linetype = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+```
+Figura 3.6
+```{r}
+
+# ---- Rangos deseados (ajústalos a tu gusto) ----
+prim_min <- 16; prim_max <- 18   # eje primario (izquierdo)
+sec_min  <- 16.6; sec_max  <- 17.1   # eje secundario (derecho)
+
+# Transformación lineal: sec -> primario
+a <- (prim_max - prim_min) / (sec_max - sec_min)
+b <- prim_min - a * sec_min
+
+figura_3.6 <- ggplot(Ldatos, aes(x = año, group = 1)) +
+  geom_line(aes(y = m, color = "M1 real (eje izquierdo)"),
+            linewidth = 0.8,
+            linetype = "twodash") +
+  geom_line(aes(y = y * a + b, color = "PIB real (eje derecho)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Logaritmos",
+    sec.axis = sec_axis(~ (. - b) / a, name = "Logaritmos")
+  ) +
+  coord_cartesian(ylim = c(prim_min, prim_max)) +   # acota el eje primario
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  labs(title = "Figura 3.6",
+       subtitle = "M1 real y PIB real",
+       caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal",
+       x = NULL, color = " ") +
+  scale_color_manual(values = c("M1 real (eje izquierdo)" = "darkgreen",
+                                "PIB real (eje derecho)" = "gray")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "bottom",
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.justification = c(0.5, 1),
+    legend.background = element_rect(fill = "white", color = "white"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+ 
+figura_3.6
+
+ggsave(
+  filename = "figura_3.6.png",
+  plot = figura_3.6,
+  width = 6, height = 4.5, dpi = 300,
+  bg = "white"
+)
+
+```
+
+Figura 3.7
+```{r}
+
+# ---- Rangos deseados (ajústalos a tu gusto) ----
+prim_min <- 0.4; prim_max <- 1.7   # eje primario (izquierdo)
+sec_min  <- 0; sec_max  <- 17   # eje secundario (derecho)
+
+# Transformación lineal: sec -> primario
+a <- (prim_max - prim_min) / (sec_max - sec_min)
+b <- prim_min - a * sec_min
+
+figura_3.7 <- ggplot(datos, aes(x = año, group = 1)) +
+  geom_line(aes(y = y / m, color = "Velocidad de circulación (eje izquierdo)"),
+            linewidth = 0.8,
+            linetype = "solid") +
+  geom_line(aes(y = r * a + b, color = "Tasa de interés (eje derecho)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Proporción de M1",
+    sec.axis = sec_axis(~ (. - b) / a, name = "Puntos porcentuales")
+  ) +
+  coord_cartesian(ylim = c(prim_min, prim_max)) +   # acota el eje primario
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  labs(title = "Figura 3.7",
+       subtitle = "Velocidad de circulación y tasas de interés",
+       caption = "**Fuente:** Elaboración propia con datos de Banco de México y Reserva Federal",  
+       x = NULL, color = " ") +
+  scale_color_manual(values = c("Velocidad de circulación (eje izquierdo)" = "darkgreen",
+                                "Tasa de interés (eje derecho)" = "darkgray")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "bottom",
+    legend.justification = c(0.5, 1),
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+figura_3.7
+
+ggsave(
+  filename = "figura_3.7.png",
+  plot = figura_3.7,
+  width = 6, height = 4.5, dpi = 300,
+  bg = "white"
+)
+
+```
+Figura 3.8
+```{r}
+
+figura_3.8 <- ggplot(datos, aes(x = año, group = 1)) +
+  geom_line(aes(y = m / y, color = "M1 / Y"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name =  "Proporción del PIB"
+  ) +
+  
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  
+  labs(
+    title = "Figura 3.8",
+    subtitle = "Inverso de la velocidad de circulación",
+    caption = "**Fuente:** Elaboración propia con datos de Banco de México y Reseva Federal.",
+    x = NULL,
+    color = NULL
+  ) +
+  scale_color_manual(values = c("M1 / Y" = "darkred")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    
+    # Leyenda dentro del gráfico (esquina superior izquierda)
+    legend.position = "bottom",
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.justification = c(0.5, 1),
+    legend.background = element_rect(fill = "white", color = "white"),
+
+    # Título y subtítulo centrados
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+
+    # Fondo blanco
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+
+    # Ejes negros visibles
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+
+    # Sin cuadrícula (quítalo si quieres conservarla)
+    panel.grid = element_blank()
+  )
+
+figura_3.8
+
+ggsave(
+  filename = "figura_3.8.png",
+  plot = figura_3.8,
+  width = 6, height = 4.5, dpi = 300,
+  bg = "white"
+)
+
+```
+Figura 3.9
+```{r}
+
+# ---- Rangos deseados (ajústalos a tu gusto) ----
+prim_min <- 16.5; prim_max <- 17.5   # eje primario (izquierdo)
+sec_min  <- 9.5; sec_max  <- 10.25   # eje secundario (derecho)
+
+# Transformación lineal: sec -> primario
+a <- (prim_max - prim_min) / (sec_max - sec_min)
+b <- prim_min - a * sec_min
+
+figura_3.9 <- ggplot(Ldatos, aes(x = año, group = 1)) +
+  geom_line(aes(y = y, color = "PIB México (eje izquierdo)"),
+            linewidth = 0.8,
+            linetype = "solid") +
+  geom_line(aes(y = y_usa * a + b, color = "PIB EE.UU. (eje derecho)"),
+            linewidth = 0.8) +
+  scale_y_continuous(
+    name = "Logaritmos",
+    sec.axis = sec_axis(~ (. - b) / a, name = "Logaritmos")
+  ) +
+  coord_cartesian(ylim = c(prim_min, prim_max)) +   # acota el eje primario
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  labs(title = "Figura 3.9",
+       subtitle = "PIB de México y Estados Unidos",
+       caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal.",
+       x = NULL, color = " ") +
+  scale_color_manual(values = c("PIB México (eje izquierdo)" = "red",
+                                "PIB EE.UU. (eje derecho)" = "darkblue")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "bottom",
+    legend.justification = c(0.5, 1),
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+figura_3.9
+
+ggsave(
+  filename = "figura_3.9.png",
+  plot = figura_3.9,
+  width = 6, height = 4.5, dpi = 300,
+  bg = "white"
+)
+
+```
+Figura 3.10
+```{r}
+
+# ---- 1. Filtro HP sobre el log del PIB ----
+# lambda = 1600 para datos trimestrales (100 si son anuales, 14400 si son mensuales)
+hp_mx  <- hpfilter(Ldatos$y,     freq = 1600, type = "lambda")
+hp_usa <- hpfilter(Ldatos$y_usa, freq = 1600, type = "lambda")
+
+# Componente cíclico en % de desviación respecto a la tendencia
+# (al ser logaritmos, cycle * 100 ≈ desviación porcentual)
+Ldatos$ciclo_mx  <- as.numeric(hp_mx$cycle)  * 100
+Ldatos$ciclo_usa <- as.numeric(hp_usa$cycle) * 100
+
+# ---- 2. Gráfica ----
+figura_3.10 <- ggplot(Ldatos, aes(x = año, group = 1)) +
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.4) +
+  geom_line(aes(y = ciclo_mx, color = "Ciclo PIB México"),
+            linewidth = 0.8) +
+  geom_line(aes(y = ciclo_usa, color = "Ciclo PIB EE.UU."),
+            linewidth = 0.8) +
+  scale_y_continuous(name = "Desviación respecto a la tendencia (%)") +
+  scale_x_date(
+    breaks = seq(as.Date("2000-04-01"), as.Date("2025-04-01"), by = "5 years"),
+    labels = function(x) format(x, "%Y")
+  ) +
+  labs(title = "Figura 3.10",
+       subtitle = "Componente cíclico del PIB de México y Estados Unidos (filtro HP)",
+       caption = "**Fuente:** Elaboración propia con datos de INEGI y Reserva Federal.",
+       x = NULL, color = NULL) +
+  scale_color_manual(values = c("Ciclo PIB México" = "aquamarine4",
+                                "Ciclo PIB EE.UU."  = "burlywood3")) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif"),
+    legend.position = "bottom",
+    legend.justification = c(0.5, 1),
+    legend.margin = margin(t = -5, unit = "pt"),
+    legend.background = element_rect(fill = "white", color = "white"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", hjust = 0.5),
+    plot.caption  = element_markdown(size = 9, hjust = 0),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.grid = element_blank()
+  )
+
+figura_3.10
+
+ggsave(
+  filename = "figura_3.10.png",
+  plot = figura_3.10,
+  width = 6, height = 4.5, dpi = 300,
+  bg = "white"
+)
+
+# ---- 3. (Opcional) Sincronía entre ciclos ----
+cor(Ldatos$ciclo_mx, Ldatos$ciclo_usa, use = "complete.obs")
+
+```
+
+Series en niveles
+```{r}
+
+# install.packages(c("patchwork", "ggtext"))
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+
+# ---- 1. Series y fechas (inicio en 2000T4) ----
+series_interes <- c("p", "y", "r", "m", "y_usa", "p_usa",
+                    "r_usa", "wti", "pp_usa", "e", "ted")
+
+faltan <- setdiff(series_interes, names(datos))
+if (length(faltan) > 0)
+  stop("No existen en datos: ", paste(faltan, collapse = ", "))
+
+fechas <- seq(as.Date("2000-10-01"), by = "quarter", length.out = nrow(datos))
+
+# ---- 2. Colores y etiquetas del eje vertical en niveles (ajústalos según tus unidades) ----
+series_mexico <- c("p", "y", "r", "m", "e") # en rojo; el resto en azul oscuro
+
+etiqueta_y <- c(
+  p      = "Índice",
+  y      = "Miles de millones de pesos",
+  r      = "Porcentaje",
+  m      = "Miles de millones de pesos",
+  y_usa  = "Miles de millones de dólares",
+  p_usa  = "Índice",
+  r_usa  = "Porcentaje",
+  wti    = "USD por barril",
+  pp_usa = "Índice",
+  e      = "Pesos por dólar",
+  ted    = "Puntos porcentuales"
+)
+
+# ---- 3. Función: una gráfica por serie ----
+grafica_serie <- function(serie) {
+  df_serie <- data.frame(fecha = fechas, valor = as.numeric(datos[[serie]]))
+  color <- if (serie %in% series_mexico) "darkred" else "darkblue"
+  ylab  <- if (serie %in% names(etiqueta_y)) etiqueta_y[[serie]] else "Nivel"
+
+  ggplot(df_serie, aes(x = fecha, y = valor, group = 1)) +
+    geom_line(color = color, linewidth = 0.8) +
+    scale_x_date(
+      breaks = seq(as.Date("2000-10-01"), max(fechas), by = "5 years"),
+      labels = function(x) format(x, "%Y")
+    ) +
+    labs(title = serie, x = NULL, y = ylab) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "serif"),
+      plot.title = element_text(hjust = 0.5),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      axis.line = element_line(color = "black"),
+      axis.ticks = element_line(color = "black"),
+      axis.text = element_text(color = "black"),
+      panel.grid = element_blank()
+    )
+}
+
+graficas <- setNames(lapply(series_interes, grafica_serie), series_interes)
+
+# ---- 4. Dos imágenes: 6 series y 5 series (cuadrícula 3 filas x 2 columnas) ----
+texto_fuente <- "**Fuente:** Elaboración propia con datos de INEGI, Banco de México y Reserva Federal."
+
+arma_panel <- function(series, titulo, subtitulo, fuente = texto_fuente) {
+  wrap_plots(graficas[series], ncol = 2, nrow = 3) +
+    plot_annotation(
+      title = titulo,
+      subtitle = subtitulo,
+      caption = fuente,
+      theme = theme(
+        text = element_text(family = "serif"),
+        plot.title = element_markdown(hjust = 0.5, family = "serif", face = "bold", size = 16),
+        plot.subtitle = element_markdown(hjust = 0.5, family = "serif", face = "italic", size = 12, margin = margin(b = 10)),
+        plot.caption = element_markdown(hjust = 0, family = "serif", size = 10, margin = margin(t = 10)),
+        plot.background = element_rect(fill = "white", color = NA)
+      )
+    )
+}
+
+panel_1 <- arma_panel(
+  series_interes[1:6],
+  "<b>Gráfica A1</b>",
+  "<i>Series en niveles (1 de 2)</i>"
+)
+
+panel_2 <- arma_panel(
+  series_interes[7:11],
+  "<b>Gráfica A1</b>",
+  "<i>Series en niveles (2 de 2)</i>"
+)
+
+ggsave("Gráficas_A1.1.png", panel_1, width = 6.4, height = 8, dpi = 300, bg = "white")
+ggsave("Gráficas_A1.2.png", panel_2, width = 6.4, height = 8, dpi = 300, bg = "white")
+
+panel_1
+panel_2
+
+```
+
+
+Todas las series en logaritmos
+```{r}
+
+#install.packages(c("patchwork", "ggtext"))
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+
+# ---- 1. Series y fechas (inicio en 2000T4) ----
+series_interes <- c("p", "y", "r", "m", "y_usa", "p_usa",
+                    "r_usa", "wti", "pp_usa", "e", "ted")
+
+faltan <- setdiff(series_interes, names(Ldatos))
+if (length(faltan) > 0)
+  stop("No existen en Ldatos: ", paste(faltan, collapse = ", "))
+
+fechas <- seq(as.Date("2000-10-01"), by = "quarter", length.out = nrow(Ldatos))
+
+# ---- 2. Colores y etiquetas del eje vertical (ajústalos si hace falta) ----
+series_mexico <- c("p", "y", "r", "m", "e")            # en rojo; el resto en azul oscuro
+etiqueta_y <- c(r = "Porcentaje", r_usa = "Porcentaje", ted = "Porcentaje")
+# Las series que no estén en 'etiqueta_y' usan "Logaritmo"
+
+# ---- 3. Función: una gráfica por serie ----
+grafica_serie <- function(serie) {
+  datos <- data.frame(fecha = fechas, valor = as.numeric(Ldatos[[serie]]))
+  color <- if (serie %in% series_mexico) "darkred" else "darkblue"
+  ylab  <- if (serie %in% names(etiqueta_y)) etiqueta_y[[serie]] else "Logaritmo"
+
+  ggplot(datos, aes(x = fecha, y = valor, group = 1)) +
+    geom_line(color = color, linewidth = 0.8) +
+    scale_x_date(
+      breaks = seq(as.Date("2000-10-01"), max(fechas), by = "5 years"),
+      labels = function(x) format(x, "%Y")
+    ) +
+    labs(title = serie, x = NULL, y = ylab) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "serif"),
+      plot.title = element_text(hjust = 0.5),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      axis.line = element_line(color = "black"),
+      axis.ticks = element_line(color = "black"),
+      axis.text = element_text(color = "black"),
+      panel.grid = element_blank()
+    )
+}
+
+graficas <- setNames(lapply(series_interes, grafica_serie), series_interes)
+
+# ---- 4. Dos imágenes: 6 series y 5 series (cuadrícula 3 filas x 2 columnas) ----
+texto_fuente <- "**Fuente:** Elaboración propia con datos de INEGI, Banco de México y Reserva Federal."
+
+arma_panel <- function(series, titulo, subtitulo, fuente = texto_fuente) {
+  wrap_plots(graficas[series], ncol = 2, nrow = 3) +
+    plot_annotation(
+      title = titulo,
+      subtitle = subtitulo,
+      caption = fuente,
+      theme = theme(
+        text = element_text(family = "serif"),
+        plot.title = element_markdown(hjust = 0.5, family = "serif", face = "bold", size = 16),
+        plot.subtitle = element_markdown(hjust = 0.5, family = "serif", face = "italic", size = 12, margin = margin(b = 10)),
+        plot.caption = element_markdown(hjust = 0, family = "serif", size = 10, margin = margin(t = 10)),
+        plot.background = element_rect(fill = "white", color = NA)
+      )
+    )
+}
+
+panel_1 <- arma_panel(
+  series_interes[1:6],
+  "<b>Gráfica A2</b>",
+  "<i>Series en logaritmos (1 de 2)</i>"
+)
+
+panel_2 <- arma_panel(
+  series_interes[7:11],
+  "<b>Gráfica A2</b>",
+  "<i>Series en logaritmos (2 de 2)</i>"
+)
+
+ggsave("Gráfica_A2.1.png", panel_1, width = 6.4, height = 8, dpi = 300, bg = "white")
+ggsave("Gráfica_A2.2.png", panel_2, width = 6.4, height = 8, dpi = 300, bg = "white")
+
+panel_1
+panel_2
+
+```
+
+Series en diferencias
+```{r}
+
+# install.packages(c("patchwork", "ggtext"))
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+
+# ---- 1. Series y fechas (inicio en 2000T4) ----
+series_interes <- c("p", "y", "r", "m", "y_usa", "p_usa",
+                    "r_usa", "wti", "pp_usa", "e", "ted")
+
+faltan <- setdiff(series_interes, names(Ddatos))
+if (length(faltan) > 0)
+  stop("No existen en Ddatos: ", paste(faltan, collapse = ", "))
+
+fechas <- seq(as.Date("2000-10-01"), by = "quarter", length.out = nrow(Ddatos))
+
+# ---- 2. Colores y etiquetas del eje vertical en diferencias (ajústalos si hace falta) ----
+series_mexico <- c("p", "y", "r", "m", "e") # en rojo; el resto en azul oscuro
+
+etiqueta_y <- c(
+  p      = "Diferencia (índice)",
+  y      = "Miles de millones de pesos",
+  r      = "Puntos porcentuales",
+  m      = "Miles de millones de pesos",
+  y_usa  = "Miles de millones de dólares",
+  p_usa  = "Diferencia (índice)",
+  r_usa  = "Puntos porcentuales",
+  wti    = "USD por barril",
+  pp_usa = "Diferencia (índice)",
+  e      = "Pesos por dólar",
+  ted    = "Puntos porcentuales"
+)
+
+# ---- 3. Función: una gráfica por serie ----
+grafica_serie <- function(serie) {
+  df_serie <- data.frame(fecha = fechas, valor = as.numeric(Ddatos[[serie]]))
+  color <- if (serie %in% series_mexico) "darkred" else "darkblue"
+  ylab  <- if (serie %in% names(etiqueta_y)) etiqueta_y[[serie]] else "Diferencia"
+
+  ggplot(df_serie, aes(x = fecha, y = valor, group = 1)) +
+    geom_hline(yintercept = 0, color = "black", linewidth = 0.5) +
+    geom_line(color = color, linewidth = 0.8) +
+    scale_x_date(
+      breaks = seq(as.Date("2000-10-01"), max(fechas), by = "5 years"),
+      labels = function(x) format(x, "%Y")
+    ) +
+    labs(title = serie, x = NULL, y = ylab) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "serif"),
+      plot.title = element_text(hjust = 0.5),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      axis.line = element_line(color = "black"),
+      axis.ticks = element_line(color = "black"),
+      axis.text = element_text(color = "black"),
+      panel.grid = element_blank()
+    )
+}
+
+graficas <- setNames(lapply(series_interes, grafica_serie), series_interes)
+
+# ---- 4. Dos imágenes: 6 series y 5 series (cuadrícula 3 filas x 2 columnas) ----
+texto_fuente <- "**Fuente:** Elaboración propia con datos de INEGI, Banco de México y Reserva Federal."
+
+arma_panel <- function(series, titulo, subtitulo, fuente = texto_fuente) {
+  wrap_plots(graficas[series], ncol = 2, nrow = 3) +
+    plot_annotation(
+      title = titulo,
+      subtitle = subtitulo,
+      caption = fuente,
+      theme = theme(
+        text = element_text(family = "serif"),
+        plot.title = element_markdown(hjust = 0.5, family = "serif", face = "bold", size = 16),
+        plot.subtitle = element_markdown(hjust = 0.5, family = "serif", face = "italic", size = 12, margin = margin(b = 10)),
+        plot.caption = element_markdown(hjust = 0, family = "serif", size = 10, margin = margin(t = 10)),
+        plot.background = element_rect(fill = "white", color = NA)
+      )
+    )
+}
+
+panel_1 <- arma_panel(
+  series_interes[1:6],
+  "<b>Gráfica A3</b>",
+  "<i>Series en diferencias (1 de 2)</i>"
+)
+
+panel_2 <- arma_panel(
+  series_interes[7:11],
+  "<b>Gráfica A3</b>",
+  "<i>Series en diferencias (2 de 2)</i>"
+)
+
+ggsave("Gráficas_A3.1.png", panel_1, width = 6.4, height = 8, dpi = 300, bg = "white")
+ggsave("Gráficas_A3.2.png", panel_2, width = 6.4, height = 8, dpi = 300, bg = "white")
+
+panel_1
+panel_2
+
+```
+
+
+
+
+
+
+
+
